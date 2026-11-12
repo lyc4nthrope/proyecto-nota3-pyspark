@@ -1,0 +1,27 @@
+# Datasets and generated results are never committed (see data/README.md)
+data/*
+!data/README.md
+output/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Spark and Hadoop local artifacts
+spark-warehouse/
+metastore_db/
+derby.log
+*.crc
+
+# Secrets and local settings
+.env
+.env.*
+
+# Editors and OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

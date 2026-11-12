@@ -31,14 +31,16 @@ Este documento es lo único que la versión pandas y la versión PySpark deben c
 |---|---|---|
 | Enero de 2019 en disco | 105,3 MB | Archivo descargado |
 | Enero de 2019, filas | 7 696 617 | Metadatos del Parquet |
-| Enero de 2019 en memoria con pandas | 1 241 MB | `memory_usage(deep=True)` |
-| Relación memoria / disco | 11,8 veces | Cálculo sobre ese mes |
+| Enero de 2019 en memoria con pandas 2.3.3 | 1 541 MB | `memory_usage(deep=True)`, todas las columnas |
+| Relación memoria / disco | 14,6 veces | Cálculo sobre ese mes |
 | 2018 en disco | 1 396 MB | Cabeceras HTTP de los 12 archivos |
 | 2019 en disco | 1 185 MB | Cabeceras HTTP de los 12 archivos |
 | **2018 + 2019 en disco** | **2 581 MB** | Suma |
-| **2018 + 2019 en memoria con pandas** | **≈ 30 GB (estimado)** | 2 581 MB × 11,8 |
+| **2018 + 2019 en memoria con pandas** | **≈ 37 GB (estimado)** | 2 581 MB × 14,6 |
 
-La estimación de 30 GB sale de un solo mes. P1 la confirma en la fase F1 con los 24 archivos. Si el equipo de prueba tiene 32 GB de RAM o más, se agrega 2017 (1 520 MB en disco).
+La estimación de 37 GB sale de un solo mes. P1 la confirma en la fase F1 con los 24 archivos. Si el equipo de prueba tiene 32 GB de RAM o más, se agrega 2017 (1 520 MB en disco) para tener margen.
+
+La cifra depende de la versión de pandas: con pandas 3.1.1 el mismo mes ocupa 1 241 MB, porque guarda el texto de forma más compacta. El proyecto usa pandas 2.3.3 (ver `requirements.txt`).
 
 ### Columnas que se usan
 

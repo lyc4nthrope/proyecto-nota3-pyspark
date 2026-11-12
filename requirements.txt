@@ -1,7 +1,8 @@
 # Python 3.11 - 3.13 and JDK 17 are required (see README.md).
 # Exact versions are pinned so every team machine measures the same software.
 pyspark==4.3.0
-pandas==3.1.1
+# pandas 2.x on purpose: PySpark 4.3.0 warns that it does not fully support pandas >= 3.0.
+pandas==2.3.3
 pyarrow==26.0.1
 psutil==7.2.2
 pytest==9.2.0

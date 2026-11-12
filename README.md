@@ -42,6 +42,31 @@ pytest -q
 
 Si las cuatro pruebas pasan, Java, Spark y la escritura en Parquet funcionan en ese equipo.
 
+## Medición
+
+```bash
+python -m benchmark.run --engine spark --sample pct_010 --repeats 3 --timeout 3600
+```
+
+| Opción | Significado |
+|---|---|
+| `--engine` | `pandas` o `spark` |
+| `--sample` | Carpeta de la muestra: `pct_001`, `pct_010`, `pct_050`, `pct_100` |
+| `--repeats` | Repeticiones (el enunciado exige 3 como mínimo) |
+| `--timeout` | Segundos antes de detener la corrida |
+
+Cada repetición agrega una fila a `output/benchmark/results.csv`. La descripción del equipo queda en `output/benchmark/environment.json`.
+
+| Columna | Qué mide |
+|---|---|
+| `status` | `ok`, `failed` (por ejemplo, error de memoria) o `timeout` |
+| `wall_seconds` | Tiempo real de principio a fin |
+| `peak_rss_mb` | Memoria RAM máxima del proceso y de sus procesos hijos (incluye la JVM de Spark) |
+| `cpu_seconds` | Tiempo de CPU sumado entre todos los núcleos |
+| `peak_system_memory_percent` | Uso máximo de RAM de todo el equipo |
+
+La memoria se lee cada 0,1 segundos: un pico más corto que eso puede no quedar registrado.
+
 ## Cómo trabajamos
 
 - Una fase del plan = una rama = un pull request hacia `main`.

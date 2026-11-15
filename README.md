@@ -90,7 +90,7 @@ python3 -m venv .venv
 pytest -q
 ```
 
-Si las cuatro pruebas pasan, Java, Spark y la escritura en Parquet funcionan en ese equipo. Este es el paso que ejecuta el revisor en **cualquiera** de los tres equipos antes de aceptar una fase.
+Si **todas** las pruebas pasan, Java, Spark y la escritura en Parquet funcionan en ese equipo. Este es el paso que ejecuta el revisor en **cualquiera** de los tres equipos antes de aceptar una fase.
 
 ## Cómo trabajamos
 

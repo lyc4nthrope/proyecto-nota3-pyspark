@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Instala winutils.exe y hadoop.dll para que PySpark funcione en Windows.
 
@@ -39,7 +39,7 @@ foreach ($name in $expected.Keys) {
     }
     $actual = (Get-FileHash -Path $target -Algorithm SHA256).Hash
     if ($actual -ne $expected[$name]) {
-        throw "$name: SHA-256 $actual no coincide con el esperado $($expected[$name]). Elimina $target y vuelve a ejecutar."
+        throw "${name}: SHA-256 $actual no coincide con el esperado $($expected[$name]). Elimina $target y vuelve a ejecutar."
     }
     Write-Host ("OK  {0}  {1}" -f $name, $actual)
 }

@@ -194,8 +194,10 @@ def save_report(report: dict) -> None:
                 "peak_mb",
                 "baseline_mb",
                 "delta_mb",
+                "rss_mean_mb",
                 "error",
             ],
+            extrasaction="ignore",
         )
         writer.writeheader()
         writer.writerows(report["operations"])
@@ -405,9 +407,11 @@ def save_comparison(comparison: dict, label: str = "ladder") -> None:
                 "peak_mb",
                 "baseline_mb",
                 "delta_mb",
+                "rss_mean_mb",
                 "frame_mb",
                 "error",
             ],
+            extrasaction="ignore",
         )
         writer.writeheader()
         for run in comparison["runs"]:
@@ -423,6 +427,7 @@ def save_comparison(comparison: dict, label: str = "ladder") -> None:
                         "peak_mb": step["peak_mb"],
                         "baseline_mb": step["baseline_mb"],
                         "delta_mb": step["delta_mb"],
+                        "rss_mean_mb": step.get("rss_mean_mb", ""),
                         "frame_mb": step.get("frame_mb", ""),
                         "error": step["error"] or "",
                     }

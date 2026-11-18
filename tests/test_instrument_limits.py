@@ -8,9 +8,10 @@ and the system memory limit.
 from __future__ import annotations
 
 import sys
+import time
 from types import SimpleNamespace
 
-from benchmark.instrument import run_with_limits
+from benchmark.instrument import measure_operation, run_with_limits
 
 
 def test_timeout_kills_the_child_and_records_the_reason(tmp_path):
@@ -23,6 +24,9 @@ def test_timeout_kills_the_child_and_records_the_reason(tmp_path):
 
     assert outcome["kill_reason"] == "timeout after 1s"
     assert outcome["returncode"] != 0
+    # The runaway process' own memory is part of the recorded outcome.
+    assert outcome["tree_mb_at_kill"] is not None
+    assert outcome["tree_mb_at_kill"] > 0
 
 
 def test_memory_limit_kills_the_child_and_records_the_reason(
@@ -54,3 +58,12 @@ def test_child_that_finishes_is_not_killed(tmp_path):
     assert outcome["kill_reason"] is None
     assert outcome["returncode"] == 0
     assert "[child] ok" in (tmp_path / "child.log").read_text(encoding="utf-8")
+
+
+def test_measured_action_records_memory_mean_and_series():
+    step = measure_operation("sleepy", lambda: time.sleep(0.3))
+
+    assert step["rss_mean_mb"] > 0
+    assert step["peak_mb"] >= step["rss_mean_mb"]
+    assert len(step["rss_series_mb"]) >= 1
+    assert {"t_s", "mb"} <= set(step["rss_series_mb"][0])

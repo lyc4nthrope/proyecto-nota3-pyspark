@@ -50,7 +50,12 @@ def measure_attempt(timeout: int) -> dict:
             log_path=log_path,
         )
         if outcome["kill_reason"]:
-            raise RuntimeError(outcome["kill_reason"])
+            detail = outcome["kill_reason"]
+            if outcome.get("tree_mb_at_kill") is not None:
+                detail += (
+                    f"; process tree {outcome['tree_mb_at_kill']} MB at kill"
+                )
+            raise RuntimeError(detail)
         tail = [
             line
             for line in log_path.read_text(encoding="utf-8").splitlines()

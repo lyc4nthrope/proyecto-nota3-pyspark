@@ -15,9 +15,13 @@ import time
 import psutil
 
 
-def process_tree_rss_mb() -> float:
-    """Total RSS of this process and all its children (Python + JVM), in MB."""
-    root = psutil.Process(os.getpid())
+def process_tree_rss_mb(root_pid: int | None = None) -> float:
+    """Total RSS of a process and all its children (Python + JVM), in MB.
+
+    Defaults to this process; pass a pid to measure another tree (for example
+    a child that is about to be killed).
+    """
+    root = psutil.Process(root_pid if root_pid is not None else os.getpid())
     total = 0
     for process in [root, *root.children(recursive=True)]:
         try:
@@ -28,24 +32,59 @@ def process_tree_rss_mb() -> float:
 
 
 class PeakRssSampler(threading.Thread):
-    """Poll process-tree RSS in the background and keep the peak."""
+    """Poll process-tree RSS in the background and keep the peak and a series."""
 
     def __init__(self, interval_s: float = 0.05) -> None:
         super().__init__(daemon=True)
         self.interval_s = interval_s
         self.baseline_mb = process_tree_rss_mb()
         self.peak_mb = self.baseline_mb
+        self.samples: list[tuple[float, float]] = []
+        self._started_at = time.perf_counter()
         self._stop_event = threading.Event()
+
+    def _sample(self) -> float:
+        current = process_tree_rss_mb()
+        self.peak_mb = max(self.peak_mb, current)
+        self.samples.append(
+            (round(time.perf_counter() - self._started_at, 3), round(current, 1))
+        )
+        return current
 
     def run(self) -> None:
         while not self._stop_event.wait(self.interval_s):
-            self.peak_mb = max(self.peak_mb, process_tree_rss_mb())
+            self._sample()
 
     def stop(self) -> float:
         self._stop_event.set()
         self.join()
-        self.peak_mb = max(self.peak_mb, process_tree_rss_mb())
+        self._sample()
         return self.peak_mb
+
+    @property
+    def mean_mb(self) -> float:
+        if not self.samples:
+            return 0.0
+        return round(
+            sum(value for _, value in self.samples) / len(self.samples), 1
+        )
+
+    def series(self, points: int = 60) -> list[dict]:
+        """Downsampled memory timeline, for graphing the run."""
+        if not self.samples:
+            return []
+        step = max(1, len(self.samples) // points)
+        buckets = [
+            self.samples[index : index + step]
+            for index in range(0, len(self.samples), step)
+        ]
+        return [
+            {
+                "t_s": round(sum(t for t, _ in bucket) / len(bucket), 2),
+                "mb": round(sum(v for _, v in bucket) / len(bucket), 1),
+            }
+            for bucket in buckets
+        ]
 
 
 def measure_operation(operation: str, action) -> dict:
@@ -67,6 +106,8 @@ def measure_operation(operation: str, action) -> dict:
         "peak_mb": round(peak_mb, 1),
         "baseline_mb": round(sampler.baseline_mb, 1),
         "delta_mb": round(peak_mb - sampler.baseline_mb, 1),
+        "rss_mean_mb": sampler.mean_mb,
+        "rss_series_mb": sampler.series(),
         "error": error,
         "value": value,
     }
@@ -125,6 +166,7 @@ def run_with_limits(
         if log_path:
             log_handle.close()
     kill_reason = None
+    tree_mb_at_kill = None
     deadline = time.time() + timeout_s
     while process.poll() is None:
         if time.time() >= deadline:
@@ -142,6 +184,7 @@ def run_with_limits(
             break
         time.sleep(poll_s)
     if kill_reason:
+        tree_mb_at_kill = round(process_tree_rss_mb(process.pid), 1)
         kill_process_tree(process.pid)
         try:
             process.wait(timeout=30)
@@ -150,6 +193,7 @@ def run_with_limits(
     return {
         "returncode": process.returncode,
         "kill_reason": kill_reason,
+        "tree_mb_at_kill": tree_mb_at_kill,
     }
 
 

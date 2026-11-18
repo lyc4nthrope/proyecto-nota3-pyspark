@@ -270,6 +270,11 @@ def _spawn_run(
         for line in log_tail[-3:]:
             print(f"  {line}", flush=True)
     if outcome["kill_reason"]:
+        error_text = outcome["kill_reason"]
+        if outcome.get("tree_mb_at_kill") is not None:
+            error_text += (
+                f"; process tree {outcome['tree_mb_at_kill']} MB at kill"
+            )
         payload = {
             "label": plan["label"],
             "engine": engine,
@@ -284,7 +289,7 @@ def _spawn_run(
                     "peak_mb": None,
                     "baseline_mb": None,
                     "delta_mb": None,
-                    "error": outcome["kill_reason"],
+                    "error": error_text,
                 }
             ],
         }

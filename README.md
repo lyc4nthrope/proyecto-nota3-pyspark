@@ -10,7 +10,7 @@ Estado y reparto del trabajo: [`PLAN.md`](PLAN.md).
 |---|---|
 | `pandas_version/` | Versión tradicional con pandas |
 | `spark_version/` | Versión con PySpark |
-| `benchmark/` | Script de medición de tiempo y memoria |
+| `benchmark/` | Mediciones y comparación pandas ↔ PySpark (guía en `benchmark/README.md`) |
 | `tests/` | Pruebas automáticas |
 | `scripts/` | Utilidades de preparación del entorno |
 | `data/` | Datos (no se suben; ver `data/README.md`) |
@@ -97,3 +97,54 @@ Si **todas** las pruebas pasan, Java, Spark y la escritura en Parquet funcionan 
 - Una fase del plan = una rama = un pull request hacia `main`.
 - Cada pull request lleva la nota de relevo de la plantilla.
 - Una fase termina cuando el revisor la ejecuta en su propio equipo.
+
+## Cómo ejecutar
+
+La **primera ejecución descarga datos** (unos 16 GB en total) y construye las
+muestras; las siguientes reutilizan todo lo ya procesado. El detalle de
+rutas, caché y opciones está en [`benchmark/README.md`](benchmark/README.md).
+
+### Primera vez (en frío)
+
+```powershell
+# Sondeo de perfil: descarga la tabla de interacciones (3,9 GB) y parte del
+# metadata (~0,3 GB), y mide sobre una muestra del 1 %
+.venv\Scripts\python -m benchmark.measure_sample
+
+# Comparación pandas vs PySpark: añade el metadata completo (~11,8 GB),
+# proyecta el catálogo y construye las muestras 1/10/50/100 %
+.venv\Scripts\python -m benchmark.compare
+```
+
+Ambos comparten la tabla de interacciones: ejecutar los dos no duplica esa
+descarga.
+
+### Repetición
+
+Los **mismos comandos** reutilizan automáticamente lo ya descargado y las
+muestras ya construidas (se valida por tamaño de archivo y por manifiesto, no
+por fecha). Para ir directo a las corridas sin reconstruir muestras:
+
+```powershell
+.venv\Scripts\python -m benchmark.compare --skip-build
+```
+
+Cada repetición de medición corre en su propio proceso; no hace falta limpiar
+nada entre corridas.
+
+### Con datos ya procesados
+
+Si `data/raw/amazon_hk/` y `data/samples/ladder/` ya están poblados (por
+ejemplo, copiados de otro equipo que hizo la primera ejecución), **todo
+funciona sin red**. La versión de referencia de pandas:
+
+```powershell
+.venv\Scripts\python -m pandas_version.pipeline
+```
+
+Para **forzar** una reconstrucción desde cero: `--force-download` y
+`--rebuild-sample` en la sonda, o borrar el manifiesto `.manifest.json`
+del artefacto que se quiera regenerar (ver `benchmark/README.md`).
+
+Los datos nunca se suben al repositorio (`data/` está en `.gitignore`); los
+resultados se regeneran siempre en `output/`.

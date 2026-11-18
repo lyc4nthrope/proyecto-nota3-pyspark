@@ -66,5 +66,6 @@ def test_pipeline_follows_the_contract_stage_counts(tmp_path):
     store_table = pd.read_parquet(output / "agg_by_store.parquet")
     assert list(store_table.columns) == [
         "store", "reviews", "products", "avg_rating", "stddev_rating",
+        "avg_text_length",
     ]
     assert int(store_table["reviews"].sum()) == summary["joined_rows"]

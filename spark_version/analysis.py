@@ -91,10 +91,18 @@ def clean_reviews(reviews: DataFrame) -> DataFrame:
 
 
 def add_derived_columns(reviews: DataFrame) -> DataFrame:
-    """Add the date parts the temporal questions need, from the millisecond timestamp."""
+    """Add the date parts the temporal questions need, plus text_length.
+
+    ``text_length`` is the number of characters of ``text`` (0 when the text
+    is null or the source has no text column at all).
+    """
     review_timestamp = F.to_timestamp(
         F.col("timestamp").cast("double") / 1000.0
     )
+    if "text" in reviews.columns:
+        text_length = F.coalesce(F.length(F.col("text")), F.lit(0))
+    else:
+        text_length = F.lit(0)
     return (
         reviews.withColumn("review_ts", review_timestamp)
         .withColumn("review_date", F.to_date("review_ts"))
@@ -102,6 +110,7 @@ def add_derived_columns(reviews: DataFrame) -> DataFrame:
         .withColumn("review_month", F.month("review_ts"))
         .withColumn("review_dow", F.dayofweek("review_ts"))
         .withColumn("review_hour", F.hour("review_ts"))
+        .withColumn("text_length", text_length)
     )
 
 
@@ -111,21 +120,23 @@ def join_with_catalog(reviews: DataFrame, catalog: DataFrame) -> DataFrame:
 
 
 def aggregate_by_store(reviews: DataFrame) -> DataFrame:
-    """Volume and rating quality per store (the group-by question)."""
+    """Volume, rating quality and text size per store (the group-by question)."""
     return reviews.groupBy("store").agg(
         F.count("*").alias("reviews"),
         F.countDistinct("parent_asin").alias("products"),
         F.round(F.avg("rating"), 4).alias("avg_rating"),
         F.round(F.stddev("rating"), 4).alias("stddev_rating"),
+        F.round(F.avg("text_length"), 4).alias("avg_text_length"),
     )
 
 
 def aggregate_by_time(reviews: DataFrame) -> DataFrame:
-    """Volume and rating quality per year/month/weekday (the temporal question)."""
+    """Volume, rating quality and text size per year/month/weekday."""
     return reviews.groupBy("review_year", "review_month", "review_dow").agg(
         F.count("*").alias("reviews"),
         F.round(F.avg("rating"), 4).alias("avg_rating"),
         F.round(F.stddev("rating"), 4).alias("stddev_rating"),
+        F.round(F.avg("text_length"), 4).alias("avg_text_length"),
     )
 
 

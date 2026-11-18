@@ -20,8 +20,13 @@ fuente, este documento se reemplaza por el contrato equivalente.
 
 | Fuente | Archivo | Tamaño | Contenido |
 |---|---|---|---|
-| Hechos | `benchmark/0core/rating_only/Home_and_Kitchen.csv` | 3,86 GB | 66.623.880 interacciones usuario-producto |
+| Hechos | `raw/review_categories/Home_and_Kitchen.jsonl` (se convierte una vez a Parquet) | 31,41 GB | ~67,4 M reseñas con texto |
 | Catálogo | `raw/meta_categories/meta_Home_and_Kitchen.jsonl` | 11,8 GB | 3.735.584 productos (se proyecta a Parquet) |
+
+La tabla `0core/rating_only` (3,86 GB, 66,6 M filas sin texto) fue la fuente de
+la primera escalera, cuya evidencia queda en `docs/evidencia/`. Desde T1 los
+hechos son el JSONL crudo: el texto es lo que multiplica la memoria de pandas y
+permite demostrar su inviabilidad.
 
 - Origen: `McAuley-Lab/Amazon-Reviews-2023` en Hugging Face (descarga por URL
   directa, sin ejecutar código remoto del dataset).
@@ -40,6 +45,10 @@ fuente, este documento se reemplaza por el contrato equivalente.
 | `parent_asin` | string | Identificador del producto (clave del join) |
 | `rating` | double | Valoración del 1 al 5 |
 | `timestamp` | long | Fecha de la reseña, milisegundos desde época |
+| `text` | string | Cuerpo de la reseña (origen de la memoria en pandas) |
+| `title` | string | Título de la reseña |
+| `helpful_vote` | long | Votos útiles recibidos |
+| `verified_purchase` | boolean | Si la compra está verificada |
 
 **Catálogo (dimensión):**
 
@@ -79,6 +88,7 @@ el cálculo de pandas quedan fijados a UTC para que coincidan):
 | `review_month` | int | Mes (1-12) |
 | `review_dow` | int | Día de la semana con numeración Spark: **1=domingo … 7=sábado** |
 | `review_hour` | int | Hora (0-23) |
+| `text_length` | int | Número de caracteres de `text` (0 si `text` es nulo) |
 
 ## 5. Join
 
@@ -103,6 +113,7 @@ Escritura en **Parquet**. Dos tablas:
 | `products` | long | Productos distintos del grupo |
 | `avg_rating` | double | Media de `rating`, 4 decimales |
 | `stddev_rating` | double | Desviación típica **muestral** (ddof=1), 4 decimales |
+| `avg_text_length` | double | Media de `text_length`, 4 decimales |
 
 **Tabla 2 — agregado temporal:**
 
@@ -114,6 +125,7 @@ Escritura en **Parquet**. Dos tablas:
 | `reviews` | long | Número de reseñas del grupo |
 | `avg_rating` | double | Media de `rating`, 4 decimales |
 | `stddev_rating` | double | Desviación típica muestral, 4 decimales |
+| `avg_text_length` | double | Media de `text_length`, 4 decimales |
 
 ## 7. Preguntas de negocio → operaciones
 
@@ -169,8 +181,8 @@ la línea base.
    **Resuelto por evidencia: no basta.** En la escalera completa (66,6 M
    filas) pandas **termina** el análisis en ~205 s con 10,2 GB de memoria pico
    (marco de 12,2 GB en un equipo de 15,3 GB, al límite). El volumen, tal
-   cual, no justifica Spark. Queda pendiente la decisión de cómo asegurar el
-   volumen: JSONL crudo con el texto en el análisis, más categorías sobre la
-   tabla 0core, u otra.
+   cual, no justifica Spark. **Decisión tomada por el grupo (2026-11-18):** los
+   hechos pasan a ser el JSONL crudo con texto; la medición de esa ruta es la
+   tarea T1.
 6. **Tolerancia exacta** de equivalencia para las salidas (formalizar 1e-4).
 7. **Licencia y cita** del dataset para las referencias del informe.

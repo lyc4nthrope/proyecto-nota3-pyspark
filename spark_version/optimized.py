@@ -35,8 +35,17 @@ from spark_version import analysis
 
 REVIEW_COLUMNS = ["user_id", "parent_asin", "rating", "timestamp"]
 # Columns the two aggregations need after cleaning; everything else is dropped
-# before caching so the cached data is as small as possible.
-BASE_COLUMNS = ["parent_asin", "rating", "review_year", "review_month", "review_dow"]
+# before caching so the cached data is as small as possible. ``text_length``
+# joins them because the contract's aggregates report ``avg_text_length``
+# (adapted to the text route of T1).
+BASE_COLUMNS = [
+    "parent_asin",
+    "rating",
+    "review_year",
+    "review_month",
+    "review_dow",
+    "text_length",
+]
 CATALOG_JOIN_COLUMNS = ["parent_asin", "store"]
 
 

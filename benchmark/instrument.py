@@ -8,6 +8,7 @@ numbers are comparable.
 from __future__ import annotations
 
 import os
+import subprocess
 import threading
 import time
 
@@ -68,6 +69,87 @@ def measure_operation(operation: str, action) -> dict:
         "delta_mb": round(peak_mb - sampler.baseline_mb, 1),
         "error": error,
         "value": value,
+    }
+
+
+MIN_AVAILABLE_MB = 700
+RAM_PERCENT_LIMIT = 95.0
+
+
+def kill_process_tree(pid: int) -> None:
+    """Kill a process and all its children.
+
+    Killing only the direct child is not enough: the measured child spawns a
+    JVM, and an orphaned JVM keeps eating the RAM we are trying to free.
+    """
+    try:
+        root = psutil.Process(pid)
+    except psutil.NoSuchProcess:
+        return
+    for process in [*root.children(recursive=True), root]:
+        try:
+            process.kill()
+        except psutil.NoSuchProcess:
+            continue
+
+
+def run_with_limits(
+    command: list[str],
+    timeout_s: int,
+    log_path=None,
+    min_available_mb: int = MIN_AVAILABLE_MB,
+    ram_percent_limit: float = RAM_PERCENT_LIMIT,
+    poll_s: float = 2.0,
+) -> dict:
+    """Run ``command`` in its own process tree under time and memory limits.
+
+    The memory limit is the contingency against a run that starts paging: a
+    thrashing pandas can freeze Windows long before its timeout fires, so the
+    tree is killed as soon as the system crosses the RAM limit and the outcome
+    is recorded as such (system RAM >= 95 % is an accepted measured result).
+
+    Output goes to ``log_path`` (a file) instead of a pipe: a pipe buffer fills
+    up and blocks the child exactly when it is already struggling.
+    """
+    log_handle = (
+        open(log_path, "w", encoding="utf-8") if log_path else subprocess.DEVNULL
+    )
+    try:
+        process = subprocess.Popen(
+            command,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    finally:
+        if log_path:
+            log_handle.close()
+    kill_reason = None
+    deadline = time.time() + timeout_s
+    while process.poll() is None:
+        if time.time() >= deadline:
+            kill_reason = f"timeout after {timeout_s}s"
+            break
+        memory = psutil.virtual_memory()
+        if (
+            memory.percent >= ram_percent_limit
+            or memory.available < min_available_mb * 1024**2
+        ):
+            kill_reason = (
+                f"killed at system RAM {memory.percent:.0f}% "
+                f"(available {memory.available / 1024**2:.0f} MB)"
+            )
+            break
+        time.sleep(poll_s)
+    if kill_reason:
+        kill_process_tree(process.pid)
+        try:
+            process.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            pass
+    return {
+        "returncode": process.returncode,
+        "kill_reason": kill_reason,
     }
 
 

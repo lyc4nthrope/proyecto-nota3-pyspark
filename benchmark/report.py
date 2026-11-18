@@ -384,13 +384,13 @@ def _std(values: list[float]) -> float:
     return (sum((value - mean) ** 2 for value in values) / (len(values) - 1)) ** 0.5
 
 
-def save_comparison(comparison: dict) -> None:
+def save_comparison(comparison: dict, label: str = "ladder") -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    (OUTPUT_DIR / "run_ladder.json").write_text(
+    (OUTPUT_DIR / f"run_{label}.json").write_text(
         json.dumps(comparison, indent=2, ensure_ascii=True, default=str),
         encoding="utf-8",
     )
-    with (OUTPUT_DIR / "measurements_ladder.csv").open(
+    with (OUTPUT_DIR / f"measurements_{label}.csv").open(
         "w", newline="", encoding="utf-8"
     ) as handle:
         writer = csv.DictWriter(
@@ -427,6 +427,6 @@ def save_comparison(comparison: dict) -> None:
                         "error": step["error"] or "",
                     }
                 )
-    (OUTPUT_DIR / "report_ladder.md").write_text(
+    (OUTPUT_DIR / f"report_{label}.md").write_text(
         render_comparison(comparison), encoding="utf-8"
     )

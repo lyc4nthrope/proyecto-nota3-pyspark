@@ -46,7 +46,7 @@ Enunciado: `../clase11Nov2026/Proyecto Nota 3.pdf`. El enunciado dice grupos de 
 | D5 | Formato de origen | **El mismo conjunto de archivos para ambas versiones** | Comparación justa; se decide CSV o Parquet en F1 según el espacio en disco |
 | D6 | Medición | Script único: tiempo con `time.perf_counter`, memoria pico con `psutil`, 3 repeticiones, salida a CSV | Lo exige el punto 4 y alimenta directamente las tablas y gráficos |
 | D7 | Optimizaciones | **Parquet + broadcast join + particionado por fecha**; `cache` solo si un DataFrame se reutiliza | Cada una se puede medir antes y después, que es lo que pide el criterio 1 |
-| D8 | Idioma | Informe en **español**; código y comentarios según indique el profesor | El enunciado está en español; confirmar si aplica la regla de inglés del Proyecto 1 |
+| D8 | Idioma | Informe en **español**; código y comentarios según indique el profesor | **Confirmado 2026-11-18:** el entregable es el informe en español; la versión en inglés queda como referencia del equipo |
 
 ## 3. Fases
 

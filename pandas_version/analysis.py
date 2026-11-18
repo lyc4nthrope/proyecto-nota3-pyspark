@@ -81,7 +81,7 @@ def add_derived_columns(reviews: pd.DataFrame) -> pd.DataFrame:
     derived["review_date"] = review_ts.dt.date
     derived["review_year"] = review_ts.dt.year
     derived["review_month"] = review_ts.dt.month
-    derived["review_dow"] = ((review_ts.dt.dayofweek + 1) % 7) + 1
+    derived["review_dow"] = ((review_ts.dt.day_of_week + 1) % 7) + 1
     derived["review_hour"] = review_ts.dt.hour
     if "text" in derived.columns:
         derived["text_length"] = derived["text"].fillna("").str.len().astype("int64")

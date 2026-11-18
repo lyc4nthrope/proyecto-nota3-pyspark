@@ -93,3 +93,14 @@ Orden y trabajo en paralelo:
 5. **La revisión es rotativa** (columna "Revisa a"), para que cada uno conozca código que no escribió. Lo exige la sustentación.
 6. **Las dificultades se anotan en `docs/BITACORA.md`** el mismo día, con fecha y solución. Alimenta la sección 3 del informe.
 7. **Si alguien se bloquea más de un día,** lo escribe en el pull request y otro toma la fase leyendo la nota de relevo.
+
+### Reparto final (2 personas, 2026-11-17)
+
+El trabajo efectivo queda entre dos personas. Tareas detalladas de Daniel en [`docs/TAREAS_DANIEL.md`](docs/TAREAS_DANIEL.md).
+
+| Persona | Hace |
+|---|---|
+| **Daniel** (Windows, datos) | Volumen con el JSONL de 31 GB para que pandas falle (T1), capturas (T2), mitigaciones de pandas (F4, T3), medición de la versión optimizada (T4) |
+| **Cristhian** (Linux) | Spark optimizado (F6), gráficos (F8), informe PDF (F9) |
+
+Por el plazo, en las muestras del 50 % y 100 % se acepta **una** repetición, y se explica en el informe.

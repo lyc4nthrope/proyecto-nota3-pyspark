@@ -7,8 +7,12 @@ Usage (from the repository root):
 The default input is the raw-text route (``measurements_raw_text.csv``), where
 pandas cannot finish the larger samples.
 
-Each run in the CSV has one row per operation; a run's total time is the sum of
-its operations and its peak memory is the highest peak among them. A run with
+Each run in the CSV has one row per operation. Time is the time of ONE full
+pass of the pipeline: for pandas (eager) that is the sum of its operations; for
+Spark it is the ``write_parquet`` operation alone, because the benchmark has no
+cache and every Spark action re-executes the whole plan from the read, so the
+sum would count the same work several times (benchmark/runner.py). Peak memory
+is the highest peak among the run's operations. A run with
 an ``error`` (killed by the RAM guard) has no valid time: it is left out of
 every average and drawn instead as an "X" at the private memory it had
 committed when it was killed, so a failure never looks like a fast run.
@@ -49,6 +53,8 @@ OPERATION_NAMES = {
     "write_parquet": "Escritura Parquet",
 }
 # "... process tree 13894.2 MB private (8344.4 MB resident) at kill"
+# Spark operation whose time is one full pass (it writes both tables from scratch).
+ONE_PASS_OPERATION = {"spark": "write_parquet"}
 PRIVATE_AT_KILL = re.compile(r"([\d.]+) MB private")
 
 
@@ -73,12 +79,19 @@ def load_runs(rows: pd.DataFrame) -> pd.DataFrame:
     failed = rows.groupby(["engine", "level_pct", "rep"])["error"].transform(
         lambda errors: errors.notna().any()
     )
-    return (
-        rows[~failed]
-        .groupby(["engine", "level_pct", "rep"], as_index=False)
-        .agg(total_s=("time_s", "sum"), peak_gb=("peak_mb", "max"))
-        .assign(peak_gb=lambda frame: frame["peak_gb"] / MB_PER_GB)
+    finished = rows[~failed]
+    keys = ["engine", "level_pct", "rep"]
+    runs = finished.groupby(keys, as_index=False).agg(
+        total_s=("time_s", "sum"), peak_gb=("peak_mb", "max")
     )
+    for engine, operation in ONE_PASS_OPERATION.items():
+        one_pass = (
+            finished[(finished["engine"] == engine) & (finished["operation"] == operation)]
+            .set_index(keys)["time_s"]
+        )
+        mask = runs["engine"] == engine
+        runs.loc[mask, "total_s"] = runs.loc[mask].set_index(keys).index.map(one_pass)
+    return runs.assign(peak_gb=lambda frame: frame["peak_gb"] / MB_PER_GB)
 
 
 def load_failures(rows: pd.DataFrame) -> pd.DataFrame:
@@ -231,7 +244,7 @@ def operations_chart(rows: pd.DataFrame, runs: pd.DataFrame, level: float,
     _style(axis, f"Tiempo medio por operación al {level:g} % de los datos", "")
     axis.grid(axis="y", visible=False)
     axis.grid(axis="x", color=GRID, linewidth=0.8)
-    axis.set_xlabel(f"Segundos (media de 3 repeticiones; {level:g} % = mayor muestra que ambos terminan)",
+    axis.set_xlabel("Segundos, media de 3 repeticiones. Spark: cada barra re-ejecuta las anteriores (sin caché)",
                     color=TEXT_SECONDARY)
     axis.set_xlim(0, data.max().max() * 1.18)
     axis.legend(frameon=False, loc="center right", labelcolor=TEXT_PRIMARY)
@@ -248,7 +261,9 @@ def write_table(csv_path: Path, summary: pd.DataFrame, failures: pd.DataFrame,
         "# Datos de los gráficos",
         "",
         f"Generado por `docs/graficos/make_charts.py` desde `docs/evidencia/{csv_path.name}`.",
-        "Tiempo total de una corrida = suma de sus operaciones; pico = el mayor pico entre ellas.",
+        "Tiempo = una pasada completa: pandas = suma de operaciones; Spark = solo write_parquet",
+        "(sin caché, cada acción de Spark re-ejecuta todo el plan; sumar contaría lo mismo varias veces).",
+        "Pico = el mayor pico entre las operaciones de la corrida.",
         "Las corridas cortadas por la guardia de RAM no entran en ningún promedio.",
         f"GB con 1 GB = {MB_PER_GB} MB.",
         "",
@@ -285,7 +300,7 @@ def main(argv: list[str]) -> int:
     failures = load_failures(rows)
     summary = summarize(runs)
     line_chart(summary, failures, "time_mean", "time_min", "time_max",
-               "Tiempo total de la canalización según el tamaño de la muestra",
+               "Tiempo de una pasada completa según el tamaño de la muestra",
                "Segundos (media de las corridas terminadas)", "s", HERE / "tiempo_total.png")
     line_chart(summary, failures, "peak_mean", None, None,
                "Memoria máxima del proceso según el tamaño de la muestra",

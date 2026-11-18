@@ -102,7 +102,9 @@ File & Content & Size & Records \\
 
 The measurements in Section~\ref{sec:evidence} were first taken with the interactions CSV,
 joined with the catalog. The full-review file, which carries the text, is used for the
-volume test. \pending{confirm with the results of task T1.}
+volume test: it was converted once to Parquet with an explicit schema (67\,409\,944
+reviews, 9.72 GB, 8 columns) and sampled at 1, 10, 50 and 100\,\%, always joined with the
+same full catalog.
 
 \subsection{Why is this a Big Data problem?}
 
@@ -266,7 +268,7 @@ Use \texttt{"\$\{name\}: ..."}, save with a BOM and add an automated test that c
 PySpark 4.3.0 warns that it does not fully support pandas 3. &
 No effect on the tests; pandas 3.1.1 is kept so that the measurements already taken stay valid. \\
 Downloads of large files could not be resumed: a network drop meant starting over. &
-\pending{describe the fix applied in task T1.} \\
+Resumable download: the partial \texttt{.part} file is kept and the transfer continues with an HTTP \texttt{Range} request. \\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -456,19 +458,132 @@ is off by default. \pending{replace with the measurement on the Windows machine 
 \section{Evidence that pandas is not viable}
 \label{sec:evidence}
 
-\pending{depends on the measurement with the full-review file (tasks T1, T2 and T3): memory
-errors, times, Task Manager screenshots and the outcome of the pandas mitigations.}
+All measurements were taken on the Windows machine (8 logical cores, 15.3 GB of RAM), with
+the full-review data that includes the text. Every figure in this section comes from
+\path{docs/evidencia/measurements_raw_text.csv}. Each run starts in a fresh process; a
+memory guard kills the whole process tree, JVM included, when system RAM reaches about
+98\,\%, records the kill as the result, and waits for the system to recover before the next
+run. At the kill it records the \emph{private} (committed) memory, because Windows trims the
+resident set of a process under pressure and the resident value understates the real demand.
+
+\subsection{Naive attempt}
+
+Reading the 31.4 GB review file directly with \texttt{pd.read\_json} committed
+\textbf{30\,305 MB of private memory in 20.1 seconds}, twice the RAM of the machine, before
+the guard stopped it at 98\,\% of system RAM.
+
+\subsection{Sample ladder}
+
+\begin{table}[H]
+\centering
+\caption{Outcome per sample and engine (raw-text route). pandas: mean of 3 repetitions;
+Spark: 3 repetitions at 1 and 10\,\%, 1 at 50 and 100\,\%.}
+\label{tab:ladder}
+\small
+\begin{tabularx}{\textwidth}{rrXX}
+\toprule
+Sample & Reviews & pandas & Spark \\
+\midrule
+1\,\%   & 673\,379    & finishes, peak 1\,335 MB & finishes, peak 3\,842 MB \\
+10\,\%  & 6\,742\,408  & finishes, peak 4\,694 MB & finishes, peak 4\,157 MB \\
+50\,\%  & 33\,706\,117 & \textbf{killed} 3/3 at 97--98\,\% RAM (12\,966--13\,131 MB private) & finishes, peak 5\,281 MB \\
+100\,\% & 67\,409\,944 & \textbf{killed} 3/3 at 98--99\,\% RAM (13\,894--14\,580 MB private) & finishes, peak 5\,897 MB \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+pandas needs the whole table in memory at once, so its memory grows with the data: it does
+not finish even half of the reviews. Spark processes the data partition by partition and
+spills to disk, so its peak stays under 6 GB from 1\,\% to 100\,\%
+(Figure~\ref{fig:memory}).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{memoria_pico.png}
+\caption{Peak memory per sample. An X marks a pandas run killed by the guard, at the private
+memory it had committed; the dashed line is the machine's RAM.}
+\label{fig:memory}
+\end{figure}
+
+\pending{Task Manager screenshots (task T2) and the pandas mitigations table, technique by
+sample: finished / failed / timeout, time, peak memory (task T3).}
 
 % ---------------------------------------------------------------------------
 \section{Comparative analysis: pandas versus Spark}
 
-\pending{tables and charts from the final measurement. The current charts, from the
-interactions CSV, are in \texttt{docs/graficos/}.}
+\subsection{How time is measured}
+
+The benchmark times each Spark operation with an action (\texttt{count}) and caches nothing.
+Because Spark is lazy, each action re-executes the plan from the read: the time of the
+``join'' step already includes reading, cleaning and deriving. Adding all the steps would
+count the same work several times (52.7 s instead of 12.2 s at 1\,\%). One full pass of the
+Spark pipeline is therefore the \texttt{write\_parquet} operation alone, which builds both
+tables from scratch. pandas is eager, so the sum of its steps is one pass. This is an
+estimate: when the write runs, the operating system already caches the input file.
+\pending{replace or confirm with the end-to-end run of \texttt{spark\_version.run} (task T4).}
+
+\begin{table}[H]
+\centering
+\caption{Time of one full pass (seconds, mean of the finished runs).}
+\label{tab:time}
+\begin{tabular}{rrrr}
+\toprule
+Sample & pandas & Spark & Spark $\div$ pandas \\
+\midrule
+1\,\%   & 4.7  & 12.2  & 2.6 \\
+10\,\%  & 27.8 & 32.3  & 1.2 \\
+50\,\%  & ---  & 161.3 & --- \\
+100\,\% & ---  & 214.6 & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{tiempo_total.png}
+\caption{Time of one full pass per sample. pandas did not finish at 50 and 100\,\%.}
+\label{fig:time}
+\end{figure}
+
+\subsection{Discussion}
+
+\begin{itemize}
+  \item \textbf{Small data: pandas wins.} At 1\,\% pandas is 2.6 times faster: Spark pays a
+  fixed cost (starting the JVM, planning, scheduling tasks) that small data does not pay back.
+  \item \textbf{The gap closes as data grows.} At 10\,\% Spark takes only 1.2 times as long.
+  \item \textbf{Large data: only Spark finishes.} At 50 and 100\,\% pandas runs out of memory,
+  while Spark processes all 67.4 million reviews in about 3.6 minutes with less than 6 GB.
+  \item \textbf{Same results.} Where both finish (1 and 10\,\%) the tables are identical:
+  9 of 9 compared pairs, the same groups and the same top store, and 0 reviews without catalog.
+\end{itemize}
+
+Per operation (Figure~\ref{fig:ops}), pandas is faster at every in-memory step. The Spark bars
+are cumulative because of the re-execution explained above, which is itself a direct effect of
+lazy evaluation without caching.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{tiempo_por_operacion_10.png}
+\caption{Mean time per operation at 10\,\%, the largest sample both engines finish.}
+\label{fig:ops}
+\end{figure}
 
 % ---------------------------------------------------------------------------
 \section{Conclusions}
 
-\pending{written from the results of Sections 5 and 6.}
+\begin{enumerate}
+  \item The hypothesis holds: on a 15.3 GB machine pandas cannot process the reviews with
+  their text from 50\,\% of the data upward, and the naive read commits 30.3 GB in 20 seconds.
+  Spark finishes 100\,\% (67.4 million reviews) with a peak below 6 GB.
+  \item Spark is not faster on small data: at 1\,\% pandas is 2.6 times faster. Spark is the
+  right tool when the data no longer fits in memory, not by default.
+  \item Lazy evaluation matters when measuring: without caching, each action recomputes the
+  whole plan, and summing per-step times overstates Spark's cost 2.7 to 4.3 times.
+  \item The optimized version (column pruning, broadcast join, no join for the temporal table,
+  shuffle partitions sized to the machine) gives the same tables as the baseline.
+  \pending{its measured gain on Windows (task T4) and the outcome of the pandas
+  mitigations (task T3).}
+\end{enumerate}
 
 % ---------------------------------------------------------------------------
 \begin{thebibliography}{9}

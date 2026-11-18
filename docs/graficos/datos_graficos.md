@@ -1,7 +1,9 @@
 # Datos de los gráficos
 
 Generado por `docs/graficos/make_charts.py` desde `docs/evidencia/measurements_raw_text.csv`.
-Tiempo total de una corrida = suma de sus operaciones; pico = el mayor pico entre ellas.
+Tiempo = una pasada completa: pandas = suma de operaciones; Spark = solo write_parquet
+(sin caché, cada acción de Spark re-ejecuta todo el plan; sumar contaría lo mismo varias veces).
+Pico = el mayor pico entre las operaciones de la corrida.
 Las corridas cortadas por la guardia de RAM no entran en ningún promedio.
 GB con 1 GB = 1024 MB.
 
@@ -10,11 +12,11 @@ GB con 1 GB = 1024 MB.
 | Muestra | Motor | Corridas | Tiempo medio (s) | Mín (s) | Máx (s) | Pico medio (GB) | Pico máx (GB) |
 |---|---|---|---|---|---|---|---|
 | 1 % | pandas | 3 | 4.7 | 4.0 | 5.7 | 1.29 | 1.30 |
-| 1 % | PySpark | 3 | 52.7 | 50.9 | 54.8 | 3.43 | 3.75 |
+| 1 % | PySpark | 3 | 12.2 | 11.4 | 12.9 | 3.43 | 3.75 |
 | 10 % | pandas | 3 | 27.8 | 26.4 | 29.8 | 4.54 | 4.58 |
-| 10 % | PySpark | 3 | 106.8 | 87.6 | 132.5 | 4.03 | 4.06 |
-| 50 % | PySpark | 1 | 433.3 | 433.3 | 433.3 | 5.16 | 5.16 |
-| 100 % | PySpark | 1 | 705.7 | 705.7 | 705.7 | 5.76 | 5.76 |
+| 10 % | PySpark | 3 | 32.3 | 26.7 | 41.3 | 4.03 | 4.06 |
+| 50 % | PySpark | 1 | 161.3 | 161.3 | 161.3 | 5.16 | 5.16 |
+| 100 % | PySpark | 1 | 214.6 | 214.6 | 214.6 | 5.76 | 5.76 |
 
 ## Corridas cortadas (no terminaron)
 
@@ -31,8 +33,8 @@ GB con 1 GB = 1024 MB.
 
 | Muestra | Veces |
 |---|---|
-| 1 % | 11.3 |
-| 10 % | 3.8 |
+| 1 % | 2.6 |
+| 10 % | 1.2 |
 
 ## Tiempo medio por operación al 10 % (s)
 

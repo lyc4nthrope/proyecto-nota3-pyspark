@@ -103,4 +103,4 @@ El trabajo efectivo queda entre dos personas. Tareas detalladas de Daniel en [`d
 | **Daniel** (Windows, datos) | Volumen con el JSONL de 31 GB para que pandas falle (T1), capturas (T2), mitigaciones de pandas (F4, T3), medición de la versión optimizada (T4) |
 | **Cristhian** (Linux) | Spark optimizado (F6), gráficos (F8), informe PDF (F9) |
 
-Por el plazo, en las muestras del 50 % y 100 % se acepta **una** repetición, y se explica en el informe.
+Por el plazo, en **Spark** al 50 % y 100 % se acepta **una** repetición, y se explica en el informe; en pandas se mantienen 3, porque ahí está la afirmación del informe.

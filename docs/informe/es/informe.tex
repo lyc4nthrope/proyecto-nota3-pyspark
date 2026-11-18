@@ -103,7 +103,10 @@ Archivo & Contenido & Tamaño & Registros \\
 
 Las mediciones de la Sección~\ref{sec:evidencia} se hicieron primero con el CSV de
 interacciones, unido al catálogo. El archivo de reseñas completas, con el texto, se usa
-para la prueba de volumen. \pendiente{confirmar con los resultados de la tarea T1.}
+para la prueba de volumen. La ruta final (tarea T1) usa el archivo de reseñas completas:
+31,41 GB de JSONL con el texto, 67.409.944 reseñas, convertido una sola vez a Parquet con
+esquema explícito (9,72 GB). En memoria, con el texto, la tabla supera de calle los 15,3 GB
+del equipo de prueba: esa es la fuente de la Sección~\ref{sec:evidencia}.
 
 \subsection{¿Por qué es un problema de Big Data?}
 
@@ -269,7 +272,9 @@ Usar \texttt{"\$\{name\}: ..."}, guardar con BOM y agregar una prueba automátic
 PySpark 4.3.0 avisa que no soporta del todo pandas 3. &
 Aviso sin efecto en las pruebas; se mantiene pandas 3.1.1 para no invalidar las mediciones ya hechas. \\
 La descarga de archivos grandes no se podía reanudar: un corte de red obligaba a empezar de cero. &
-\pendiente{describir la solución aplicada en la tarea T1.} \\
+Se conserva el archivo parcial (\texttt{.part}) y la siguiente petición continúa con
+\texttt{Range: bytes=...}; si el servidor ignora el rango, se empieza de cero limpio. Así un
+corte al 90\,\% ya no obliga a re-descargar los 31 GB. \\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -456,26 +461,221 @@ En una prueba con datos sintéticos de 20 millones de reseñas en el equipo Linu
 optimizada produjo tablas idénticas a la base y tardó 25,7 a 26,1 segundos, frente a 27,1 a
 27,7 de la base. Con el cache activado tardó más (28,8 a 29,2 segundos): releer cuatro
 columnas de Parquet costó menos que guardar 20 millones de filas en memoria. Por eso el cache
-queda apagado por defecto. \pendiente{reemplazar por la medición en el equipo Windows (tarea T4).}
+queda apagado por defecto. En el equipo Windows, con la muestra completa del 100\,\%
+(67,4 millones de reseñas con texto), la versión optimizada tardó \textbf{123,4 segundos} de
+principio a fin y produjo las mismas tablas que la base: 67.409.944 filas, 375.506 tiendas y
+1.985 grupos temporales, idénticos.
 
 % ---------------------------------------------------------------------------
 \section{Evidencia de inviabilidad de pandas}
 \label{sec:evidencia}
 
-\pendiente{depende de la medición con el archivo de reseñas completas (tareas T1, T2 y T3):
-errores de memoria, tiempos, capturas del Administrador de tareas y resultado de las
-mitigaciones de pandas.}
+Todas las mediciones se hicieron en el equipo Windows (8 núcleos lógicos, 15,3 GB de RAM),
+con los datos de reseñas completas, incluido el texto. Cada cifra de esta sección procede de
+\path{docs/evidencia/measurements_raw_text.csv}. Cada corrida arranca en un proceso propio;
+una guardia de memoria mata el árbol de procesos completo, JVM incluida, cuando la RAM del
+sistema llega alrededor del 98\,\%, registra el corte como resultado y espera a que el
+sistema se recupere antes de la siguiente corrida. En el corte se registran los bytes
+\emph{privados} (comprometidos), porque Windows recorta el conjunto residente de un proceso
+bajo presión y el valor residente subestima la demanda real.
+
+\subsection{Intento ingenuo}
+
+Leer directamente el archivo de reseñas de 31,4 GB con \texttt{pd.read\_json} comprometió
+\textbf{30.305 MB de memoria privada en 20,1 segundos}, el doble de la RAM de la máquina,
+antes de que la guardia lo detuviera al 98\,\% de RAM del sistema.
+
+\subsection{Escalera de muestras}
+
+\begin{table}[H]
+\centering
+\caption{Resultado por muestra y motor (ruta con texto). pandas: media de 3 repeticiones;
+Spark: 3 repeticiones al 1 y 10\,\%, 1 al 50 y 100\,\%.}
+\label{tab:escalera}
+\small
+\begin{tabularx}{\textwidth}{rrXX}
+\toprule
+Muestra & Reseñas & pandas & Spark \\
+\midrule
+1\,\%   & 673.379    & termina, pico 1.335 MB & termina, pico 3.842 MB \\
+10\,\%  & 6.742.408  & termina, pico 4.694 MB & termina, pico 4.157 MB \\
+50\,\%  & 33.706.117 & \textbf{cortado} 3/3 al 97--98\,\% de RAM (12.966--13.131 MB privados) & termina, pico 5.281 MB \\
+100\,\% & 67.409.944 & \textbf{cortado} 3/3 al 98--99\,\% de RAM (13.894--14.580 MB privados) & termina, pico 5.897 MB \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+pandas necesita la tabla completa en memoria a la vez, así que su memoria crece con los
+datos: no termina ni siquiera con la mitad de las reseñas. Spark procesa los datos partición
+a partición y vuelca a disco, así que su pico se mantiene por debajo de 6 GB del 1\,\% al
+100\,\% (Figura~\ref{fig:memoria}).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{memoria_pico.png}
+\caption{Memoria pico por muestra. Una X marca una corrida de pandas cortada por la guardia,
+en la memoria privada que había comprometido; la línea discontinua es la RAM del equipo.}
+\label{fig:memoria}
+\end{figure}
+
+\subsection{Capturas del sistema}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{../../evidencia/capturas/pandas_fallo_memoria.png}
+\caption{Administrador de tareas mientras pandas procesa la muestra del 100\,\%: la RAM del
+sistema llega al 98\,\%.}
+\label{fig:captura-pandas}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{../../evidencia/capturas/pandas_error_terminal.png}
+\caption{El corte registrado en la terminal: RAM del sistema al 98\,\% y 30.305 MB de memoria
+privada comprometidos.}
+\label{fig:captura-error}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{../../evidencia/capturas/spark_100_memoria.png}
+\caption{Spark terminando la muestra del 100\,\% con la memoria estable: el pico se mantiene
+por debajo de 6 GB.}
+\label{fig:captura-spark}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{../../evidencia/capturas/spark_ui_dag.png}
+\caption{Interfaz de Spark (\texttt{localhost:4040}) durante la corrida del 100\,\%, con el
+plan del job.}
+\label{fig:captura-ui}
+\end{figure}
+
+\subsection{Mitigaciones de pandas}
+
+El enunciado exige intentar primero las técnicas propias de pandas antes de declararlo
+inviable. Se implementaron las tres y se midieron con el mismo instrumento.
+
+\begin{table}[H]
+\centering
+\caption{Mitigaciones de pandas sobre la muestra del 100\,\% (67,4 millones de reseñas con
+texto).}
+\label{tab:mitigaciones}
+\begin{tabular}{llrr}
+\toprule
+Técnica & Resultado & Tiempo (s) & Pico (MB) \\
+\midrule
+Solo las columnas necesarias & cortada al 98\,\% de RAM & --- & 10.663 \\
+Tipos más compactos & cortada al 97\,\% de RAM & --- & 10.223 \\
+\textit{Chunks} + agregación parcial & termina & 3.460 & 427$^{\ast}$ \\
+\bottomrule
+\end{tabular}
+\smallskip
+
+\footnotesize{$^{\ast}$Conjuntos de ASIN por tienda que deben mantenerse vivos para calcular
+\texttt{products}. Spark produce las dos tablas en 214,6 s (una pasada).}
+\end{table}
+
+Las dos primeras técnicas terminan hasta el 10\,\% y mueren después: el texto de la reseña es
+columna del contrato (para \texttt{avg\_text\_length}), no se puede descartar ni estrechar, y
+son sus bytes los que llenan la memoria. La lectura por \textit{chunks} es la única que
+termina el 100\,\%, pero a un precio que ninguna alternativa paga: 57,7 minutos frente a los
+3,6 de una pasada de Spark (unas 16 veces más lento), reteniendo 3.734.414 ASIN vivos en
+conjuntos por tienda solo para calcular \texttt{products}, y sin poder expresar operaciones
+globales —ordenar 67 millones de filas, percentiles, ventanas— sin volver a leerlo todo.
+Ninguna acerca a pandas a terminar el 100\,\% en un tiempo práctico: o no termina, o termina
+dieciséis veces más lento y con parte de la lógica reescrita a mano.
 
 % ---------------------------------------------------------------------------
 \section{Análisis comparativo pandas frente a Spark}
+\label{sec:comparativo}
 
-\pendiente{tablas y gráficos con la medición final. Los gráficos actuales, con el CSV de
-interacciones, están en \texttt{docs/graficos/}.}
+\subsection{Cómo se mide el tiempo}
+
+El benchmark mide cada operación de Spark con una acción (\texttt{count}) y no guarda nada en
+caché. Como Spark es perezoso, cada acción re-ejecuta el plan desde la lectura: el tiempo del
+paso ``join'' ya incluye leer, limpiar y derivar. Sumar todos los pasos contaría el mismo
+trabajo varias veces (52,7 s en lugar de 12,2 s al 1\,\%). Una pasada completa del pipeline de
+Spark es por tanto la operación \texttt{write\_parquet}, que construye las dos tablas desde
+cero. pandas es ansioso (eager), así que la suma de sus pasos sí es una pasada. Es una
+estimación: cuando corre la escritura, el sistema ya tiene el archivo de entrada en caché.
+Como comprobación, la versión optimizada corrió de principio a fin sobre la muestra del
+100\,\% en 123,4 segundos, por debajo de esa estimación de una pasada de la base.
+
+\begin{table}[H]
+\centering
+\caption{Tiempo de una pasada completa (segundos, media de las corridas terminadas).}
+\label{tab:tiempos}
+\begin{tabular}{rrrr}
+\toprule
+Muestra & pandas & Spark & Spark $\div$ pandas \\
+\midrule
+1\,\%   & 4,7   & 12,2  & 2,6 \\
+10\,\%  & 27,8  & 32,3  & 1,2 \\
+50\,\%  & ---   & 161,3 & --- \\
+100\,\% & ---   & 214,6 & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{tiempo_total.png}
+\caption{Tiempo de una pasada completa por muestra. pandas no terminó al 50 ni al 100\,\%.}
+\label{fig:tiempo}
+\end{figure}
+
+\subsection{Discusión}
+
+\begin{itemize}
+  \item \textbf{Datos pequeños: gana pandas.} Al 1\,\%, pandas es 2,6 veces más rápido: Spark
+  paga un costo fijo (arranque de la JVM, planificación, scheduling de tareas) que los datos
+  pequeños no amortizan.
+  \item \textbf{La brecha se cierra al crecer los datos.} Al 10\,\%, Spark solo tarda 1,2 vez
+  más.
+  \item \textbf{Datos grandes: solo Spark termina.} Al 50 y 100\,\%, pandas se queda sin
+  memoria, mientras Spark procesa los 67,4 millones de reseñas en unos 3,6 minutos con menos
+  de 6 GB.
+  \item \textbf{Mismos resultados.} Donde ambos terminan (1 y 10\,\%) las tablas son
+  idénticas: 9 de 9 pares comparados, mismos grupos y misma tienda líder, y 0 reseñas sin
+  catálogo.
+  \item \textbf{Las optimizaciones tienen umbral de rentabilidad.} La versión optimizada gana
+  1,74 veces al 100\,\% (123,4 s frente a 214,6), pero pierde al 10\,\% (39,3 s frente a 32,3):
+  el \emph{broadcast} y la poda de columnas no pagan su costo con pocos millones de filas.
+\end{itemize}
+
+Por operación (Figura~\ref{fig:ops}), pandas es más rápido en cada paso que cabe en memoria.
+Las barras de Spark son acumulativas por la re-ejecución explicada antes, que es en sí misma
+un efecto directo de la evaluación perezosa sin caché.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{tiempo_por_operacion_10.png}
+\caption{Tiempo medio por operación al 10\,\%, la mayor muestra que terminan ambos motores.}
+\label{fig:ops}
+\end{figure}
 
 % ---------------------------------------------------------------------------
 \section{Conclusiones}
 
-\pendiente{se escriben con los resultados de las secciones 5 y 6.}
+\begin{enumerate}
+  \item La hipótesis se cumple: en un equipo de 15,3 GB, pandas no puede procesar las reseñas
+  con su texto a partir del 50\,\% de los datos, y la lectura ingenua compromete 30,3 GB en 20
+  segundos. Spark termina el 100\,\% (67,4 millones de reseñas) con un pico por debajo de 6 GB.
+  \item Spark no es más rápido con datos pequeños: al 1\,\%, pandas es 2,6 veces más rápido.
+  Spark es la herramienta correcta cuando los datos dejan de caber en memoria, no por defecto.
+  \item La evaluación perezosa importa al medir: sin caché, cada acción recalcula el plan
+  completo, y sumar los tiempos por paso sobreestima el costo de Spark entre 2,7 y 4,3 veces.
+  \item La versión optimizada (poda de columnas, \emph{broadcast join}, sin \emph{join} para
+  la tabla temporal, \emph{shuffle} ajustado al equipo) produce las mismas tablas que la base:
+  123,4 s frente a 214,6 de una pasada (1,74 veces más rápida) en el 100\,\%, aunque a escala
+  pequeña su costo no compensa.
+  \item Las mitigaciones de pandas no bastan: la selección de columnas y los tipos compactos
+  mueren al 50 y 100\,\% porque el texto es parte del análisis, y los \textit{chunks} terminan
+  pero 16 veces más lento y con parte de la lógica reescrita a mano. pandas es inviable
+  \emph{aun mitigado} para este volumen en este equipo.
+\end{enumerate}
 
 % ---------------------------------------------------------------------------
 \begin{thebibliography}{9}

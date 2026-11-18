@@ -5,8 +5,10 @@ derived columns, join and aggregates, so the outputs stay equivalent) and only
 changes *how* Spark executes them. Each optimization targets a cost visible in
 the baseline physical plan:
 
-1. Column pruning: read only the four review columns the analysis uses.
-   Parquet is columnar, so the other columns are never read from disk.
+1. Column pruning: read only the review columns the analysis uses (the four
+   keys plus ``text`` when the source has it, for ``avg_text_length``).
+   Parquet is columnar, so the other columns are never read from disk, and
+   ``text`` is reduced to its length before anything is shuffled or cached.
 2. No join for the temporal table: it does not use any catalog column, so it
    is computed from the reviews alone. That removes a whole join and shuffle.
 3. Broadcast join for the store table: the catalog is reduced to
@@ -34,17 +36,13 @@ from pyspark.sql import functions as F
 from spark_version import analysis
 
 REVIEW_COLUMNS = ["user_id", "parent_asin", "rating", "timestamp"]
+# Optional: present in the raw-text route, absent in the projected samples.
+# analysis.add_derived_columns turns it into text_length (0 when missing).
+TEXT_COLUMN = "text"
 # Columns the two aggregations need after cleaning; everything else is dropped
-# before caching so the cached data is as small as possible. ``text_length``
-# joins them because the contract's aggregates report ``avg_text_length``
-# (adapted to the text route of T1).
+# before caching so the cached data is as small as possible.
 BASE_COLUMNS = [
-    "parent_asin",
-    "rating",
-    "review_year",
-    "review_month",
-    "review_dow",
-    "text_length",
+    "parent_asin", "rating", "review_year", "review_month", "review_dow", "text_length",
 ]
 CATALOG_JOIN_COLUMNS = ["parent_asin", "store"]
 
@@ -71,8 +69,14 @@ def default_shuffle_partitions() -> int:
 
 
 def read_reviews(spark: SparkSession, reviews_path: Path) -> DataFrame:
-    """Read only the review columns the analysis uses (column pruning)."""
-    return spark.read.parquet(str(reviews_path)).select(*REVIEW_COLUMNS)
+    """Read only the review columns the analysis uses (column pruning).
+
+    ``text`` is kept only if the source has it; otherwise text_length is 0,
+    exactly as in the baseline.
+    """
+    reviews = spark.read.parquet(str(reviews_path))
+    columns = REVIEW_COLUMNS + ([TEXT_COLUMN] if TEXT_COLUMN in reviews.columns else [])
+    return reviews.select(*columns)
 
 
 def read_catalog_for_join(spark: SparkSession, catalog_path: Path) -> DataFrame:

@@ -148,3 +148,40 @@ del artefacto que se quiera regenerar (ver `benchmark/README.md`).
 
 Los datos nunca se suben al repositorio (`data/` está en `.gitignore`); los
 resultados se regeneran siempre en `output/`.
+
+## Datos
+
+*Amazon Reviews 2023* (McAuley Lab, UC San Diego), categoría **Home and Kitchen**, publicado en
+Hugging Face (`McAuley-Lab/Amazon-Reviews-2023`). Los scripts de `benchmark/` los descargan por URL
+directa; no se ejecuta código del repositorio de origen.
+
+| Archivo | Contenido | Tamaño |
+|---|---|---|
+| `0core/rating_only` (CSV) | Interacciones usuario–producto (66,6 M filas) | 3,86 GB |
+| `meta_Home_and_Kitchen` (JSONL) | Catálogo de productos (3.735.584) | 11,8 GB |
+| Reseñas completas `Home_and_Kitchen` (JSONL) | 67.409.944 reseñas **con texto**: la ruta del informe | 31,4 GB |
+
+## Reproducir los resultados del informe (ruta con texto)
+
+Las cifras de las secciones 5 y 6 del informe salen de estos comandos (las fracciones van de 0 a 1: `1.0` = 100 %):
+
+```powershell
+# Escalera 1/10/50/100 % con el texto: descarga reanudable, conversión a Parquet y mediciones
+.venv\Scripts\python -m benchmark.compare --raw
+# Intento ingenuo: pd.read_json sobre los 31 GB (termina cortado por la guardia de RAM)
+.venv\Scripts\python -m benchmark.naive_attempt
+# Mitigaciones de pandas (columnas, tipos, chunks) por nivel
+.venv\Scripts\python -m benchmark.run_mitigations
+# Versión Spark optimizada, de principio a fin, al 100 %
+.venv\Scripts\python -m benchmark.measure_optimized --level 1.0 --rep 1
+# Gráficos del informe
+.venv\Scripts\python docs\graficos\make_charts.py
+```
+
+La versión optimizada también se puede correr sola:
+
+```powershell
+.venv\Scripts\python -m spark_version.run --reviews <muestra.parquet> --catalog data\samples\ladder\catalog.parquet --output output\spark_optimized
+```
+
+Evidencia ya generada: `docs/evidencia/` (CSV de mediciones, mitigaciones y capturas). Informe: `docs/informe/es/informe.pdf` y `docs/informe/en/report.pdf`.

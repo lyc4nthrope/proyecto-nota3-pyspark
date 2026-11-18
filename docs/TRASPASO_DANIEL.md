@@ -12,7 +12,7 @@ Fecha: 2026-11-18. Cristhian se queda sin sesión; Daniel (con su IA) cierra.
 1. **El entregable es el informe en INGLÉS:** `docs/informe/en/report.tex` → `docs/informe/en/report.pdf`.
    El informe en español (`docs/informe/es/`) es solo para el equipo: **no hace falta actualizarlo**.
 2. El inglés ya tiene escritas las secciones 5, 6 y 7 con la evidencia de T1 (este PR).
-3. Quedan **5 marcas `\pending{...}`** en rojo. Todas dependen de T2, T3 y T4.
+3. Quedan **4 marcas `\pending{...}`** en rojo. Todas dependen de T2, T3 y T4.
 4. **Cambio importante de métrica:** el tiempo de Spark ahora es **una pasada** (`write_parquet`), no la suma de operaciones. El porqué está en la sección 2.
 5. Al final: compilar dos veces y entregar `report.pdf` sin ninguna marca `[PENDING`.
 
@@ -158,7 +158,7 @@ y en la sección 7, punto 4, borra "and the outcome of the pandas mitigations (t
 cd docs\informe\en
 pdflatex -interaction=nonstopmode report.tex
 pdflatex -interaction=nonstopmode report.tex
-Select-String -Path report.tex -Pattern '\\pending\{'    # solo debe salir la línea 42 (la definición)
+Select-String -Path report.tex -Pattern '\\pending\{'    # no debe devolver nada
 ```
 
 Abre `report.pdf` y busca "PENDING": **no debe aparecer**. Si no tienes `pdflatex`, usa Overleaf: sube `docs/informe/en/report.tex` y la carpeta `docs/graficos/` (respetando las rutas).
@@ -217,7 +217,7 @@ steps:
     goal: mitigation table in Section 5
     plan_b: honest paragraph citing \cite{pandasscale}; remove T3 mention in Conclusions item 4
   - id: P5
-    goal: pdflatex twice; no '\pending{' left except its definition; no 'PENDING' in the PDF
+    goal: pdflatex twice; no "\pending{" left in report.tex; no "PENDING" in the PDF
   - id: P6
     goal: commit, push, deliver report.pdf
 time_metric_rule: Spark time = write_parquet (one pass); never the sum of operations

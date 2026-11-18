@@ -14,6 +14,7 @@ HF_RESOLVE = (
     "https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023/resolve/main/"
 )
 REVIEW_URL = HF_RESOLVE + "benchmark/0core/rating_only/Home_and_Kitchen.csv"
+REVIEW_JSONL_URL = HF_RESOLVE + "raw/review_categories/Home_and_Kitchen.jsonl"
 META_URL = HF_RESOLVE + "raw/meta_categories/meta_Home_and_Kitchen.jsonl"
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -23,8 +24,14 @@ OUTPUT_DIR = REPO_ROOT / "output" / "measurements"
 TABLES_DIR = OUTPUT_DIR / "tables"
 
 REVIEW_RAW = RAW_DIR / "Home_and_Kitchen.0core.rating_only.csv"
+REVIEW_JSONL_RAW = RAW_DIR / "reviews_Home_and_Kitchen_raw.jsonl"
 META_SAMPLE = RAW_DIR / "meta_Home_and_Kitchen_1pct.jsonl"
 SAMPLE_PATH = SAMPLE_DIR / "amazon_hk_reviews_1pct.parquet"
+
+# Facts of the text route (T1): the raw reviews converted once to Parquet,
+# plus the ladder samples derived from it.
+RAW_TEXT_DIR = SAMPLE_DIR / "ladder_raw"
+RAW_TEXT_FACTS = RAW_TEXT_DIR / "facts_with_text.parquet"
 
 
 def tables_dir_for(engine: str) -> Path:

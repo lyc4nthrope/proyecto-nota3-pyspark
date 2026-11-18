@@ -125,12 +125,28 @@ def _download_once(
     expected_size: int,
     progress_mb: int = DOWNLOAD_PROGRESS_MB,
 ) -> dict:
+    """Download ``url`` to ``destination``, resuming any leftover partial file.
+
+    The ``.part`` file is kept when an attempt fails, so the next one
+    continues from where the previous stopped using an HTTP ``Range``
+    request. A server that ignores the range (HTTP 200 instead of 206) makes
+    the attempt restart cleanly from zero. This matters for multi-GB files:
+    without it, an interruption at 90 % costs the whole download again.
+    """
     partial = destination.with_suffix(destination.suffix + ".part")
-    request = Request(url, headers=_user_agent())
-    written = 0
-    next_report = progress_mb * 1024**2
-    try:
-        with urlopen(request, timeout=300) as response, open(partial, "wb") as handle:
+    offset = partial.stat().st_size if partial.exists() else 0
+    headers = _user_agent()
+    if offset:
+        headers["Range"] = f"bytes={offset}-"
+    request = Request(url, headers=headers)
+    block = progress_mb * 1024**2
+    with urlopen(request, timeout=300) as response:
+        status = getattr(response, "status", 200)
+        if offset and status != 206:
+            offset = 0  # the server ignored the range: start over
+        written = offset
+        next_report = (offset // block + 1) * block
+        with open(partial, "ab" if offset else "wb") as handle:
             while True:
                 chunk = response.read(1 << 20)
                 if not chunk:
@@ -144,16 +160,13 @@ def _download_once(
                         f"{expected_size / (1024**2):.0f} MB",
                         flush=True,
                     )
-                    next_report += progress_mb * 1024**2
-        if written != expected_size:
-            raise IOError(
-                f"incomplete download: {written} of {expected_size} bytes"
-            )
-        os.replace(partial, destination)
-    except Exception:
-        partial.unlink(missing_ok=True)
-        raise
-    return {"url": url, "bytes": written}
+                    next_report += block
+    if written != expected_size:
+        raise IOError(
+            f"incomplete download: {written} of {expected_size} bytes"
+        )
+    os.replace(partial, destination)
+    return {"url": url, "bytes": written, "resumed_from": offset}
 
 
 def download_full(

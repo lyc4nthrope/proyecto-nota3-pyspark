@@ -1,0 +1,5 @@
+# LaTeX build by-products (the .tex and the final PDFs are versioned)
+*.aux
+*.log
+*.out
+*.toc

@@ -1,0 +1,516 @@
+% Technical report — Proyecto Nota 3: Big Data with Python and PySpark (English version)
+% Build from this folder:  pdflatex report.tex  (twice, for the table of contents)
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+\usepackage{lmodern}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{caption}
+\usepackage{float}
+\usepackage[hidelinks]{hyperref}
+
+\graphicspath{{../../graficos/}}
+
+\definecolor{codebg}{HTML}{F6F6F4}
+\definecolor{codecomment}{HTML}{52514E}
+\definecolor{pending}{HTML}{B3261E}
+
+\lstset{
+  language=Python,
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codebg},
+  commentstyle=\color{codecomment}\itshape,
+  keywordstyle=\bfseries,
+  frame=single,
+  rulecolor=\color{codebg},
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  captionpos=b
+}
+\renewcommand{\lstlistingname}{Listing}
+
+% Visible marker for what is still missing before submission.
+\newcommand{\pending}[1]{\textcolor{pending}{\textbf{[PENDING: #1]}}}
+
+\title{Processing 66 million Amazon reviews:\\
+pandas versus Apache Spark (PySpark)\\[0.4em]
+\large Proyecto Nota 3 --- Big Data with Python and PySpark}
+\author{Cristhian Eduardo Osorio Restrepo \and Daniel Stiven Pérez Córdoba \and Maria Camargo\\[0.3em]
+\small Professor: Ing. Luis Fernando Castro Rojas, Mg, PhD.}
+\date{November 2026}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+% ---------------------------------------------------------------------------
+\section{Introduction and problem statement}
+
+\subsection{Domain and problem}
+
+E-commerce produces millions of product reviews every day. A store or seller that wants to
+understand them needs to answer simple questions over very large volumes: when activity
+peaks, which stores receive the most reviews and how good their ratings are, and which
+records are incomplete.
+
+This project answers five business questions about the Amazon \emph{Home and Kitchen}
+reviews:
+
+\begin{enumerate}
+  \item How does the number of reviews behave over time (year, month and weekday)?
+  \item Which stores concentrate the largest volume of reviews?
+  \item What is the mean rating and its spread in each group?
+  \item Which records are incomplete or inconsistent?
+  \item Which reviews have, and which lack, their product in the catalog?
+\end{enumerate}
+
+Answering them requires the operations the assignment asks for: reading, cleaning, derived
+columns, a join with the product catalog, group-by aggregations and writing the results to
+Parquet.
+
+\subsection{Data}
+
+The project uses the \emph{Amazon Reviews 2023} dataset from the McAuley Lab at the
+University of California San Diego~\cite{hou2024}, published on Hugging Face. Files are
+downloaded through direct URLs, without running any code from the source repository.
+
+\begin{table}[H]
+\centering
+\caption{Files used from the \emph{Home and Kitchen} category. Sizes checked from the HTTP
+headers on 17 November 2026.}
+\label{tab:data}
+\begin{tabularx}{\textwidth}{lXrr}
+\toprule
+File & Content & Size & Records \\
+\midrule
+\texttt{0core/rating\_only} (CSV) & User--product interactions: user, product, rating and date & 3.86 GB & 66,623,880 \\
+\texttt{meta\_Home\_and\_Kitchen} (JSONL) & Product catalog: category, store, price & 11.8 GB & 3,735,584 \\
+\texttt{review\_categories} (JSONL) & Full reviews, with title and text & 31.4 GB & --- \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The measurements in Section~\ref{sec:evidence} were first taken with the interactions CSV,
+joined with the catalog. The full-review file, which carries the text, is used for the
+volume test. \pending{confirm with the results of task T1.}
+
+\subsection{Why is this a Big Data problem?}
+
+\begin{itemize}
+  \item \textbf{Volume.} The full-review file is 31.4 GB, twice the RAM of the test machine
+  (15.3 GB). The interactions alone are 66.6 million rows.
+  \item \textbf{Variety.} Tabular data (CSV) is combined with semi-structured data (one JSON
+  object per line) that includes free text.
+  \item \textbf{Memory, not disk.} A compressed or columnar file takes far less space on disk
+  than once loaded into memory. In the measurements, joining the interactions with the
+  catalog produces a pandas \emph{DataFrame} of about 12 GB, at the limit of the machine's
+  15.3 GB.
+\end{itemize}
+
+The project's hypothesis is that, on the same machine, pandas stops being viable when the
+volume exceeds the available memory, while Spark completes the work because it processes
+data partition by partition.
+
+% ---------------------------------------------------------------------------
+\section{Theoretical background}
+
+\subsection{Big Data}
+
+Data is called Big Data when its volume, arrival speed or variety exceeds what a traditional
+tool can process in reasonable time and with reasonable resources. The usual answer is to
+\emph{scale out}: split the data into parts and process them in parallel, on several cores
+or several machines, instead of relying on one bigger machine.
+
+\subsection{Apache Spark architecture}
+
+Apache Spark is an open-source distributed processing engine~\cite{zaharia2016,chambers2018}. Its main
+parts are:
+
+\begin{description}
+  \item[Driver.] The process that runs the user's program. It builds the execution plan,
+  splits it into tasks and schedules them. It must not receive all the data: calling
+  \texttt{collect()} on a large dataset runs the driver out of memory.
+  \item[Executors.] The processes that run the tasks on the data. In the local mode used
+  here (\texttt{local[*]}), driver and executors live in the same Java virtual machine, with
+  one execution thread per core.
+  \item[Partitions.] Data is split into blocks called partitions. Each task processes one
+  partition, so the whole dataset never has to be in memory at once. If a partition does not
+  fit, Spark writes intermediate data to disk (\emph{spill}) instead of failing.
+  \item[Transformations and actions.] Transformations (\texttt{filter},
+  \texttt{withColumn}, \texttt{join}, \texttt{groupBy}) describe a new dataset without
+  computing it. Actions (\texttt{count}, \texttt{write}, \texttt{collect}) request a result
+  and trigger execution.
+  \item[Lazy evaluation.] Because transformations are not executed immediately, Spark knows
+  the whole plan before running it. That lets it, for instance, read only the columns in use
+  or filter before joining.
+  \item[DAG.] The plan is a directed acyclic graph of operations. Spark cuts it into
+  \emph{stages} wherever data must be redistributed across partitions (a \emph{shuffle}),
+  such as a \texttt{groupBy} or a \texttt{join}. The shuffle is the most expensive operation,
+  because it moves data between tasks and writes it to disk.
+\end{description}
+
+On top of this core, the DataFrame API and Spark SQL~\cite{armbrust2015} add the
+\emph{Catalyst} optimizer, which rewrites the logical plan before execution, and since
+Spark~3 \emph{adaptive query execution} (AQE), which adjusts the plan with real statistics,
+for example by merging small partitions~\cite{sparkdocs}.
+
+\subsection{Optimization techniques used}
+
+\begin{description}
+  \item[Parquet.] A columnar, compressed format~\cite{parquet}. Since each column is stored
+  separately, a query reads only the columns it needs (\emph{column pruning}).
+  \item[Broadcast join.] When one of the two tables is small, it is copied in full to every
+  executor and the large table is joined where it already is, with no shuffle.
+  \item[Caching.] Keeps an intermediate result in memory when it is reused several times, so
+  it is not recomputed. It only pays off when recomputing costs more than storing.
+  \item[Shuffle partitions.] By default Spark creates 200 partitions per shuffle; on a single
+  machine that means many tiny tasks. Sizing them to the number of cores lowers the
+  scheduling cost.
+\end{description}
+
+\subsection{Limitations of pandas}
+
+pandas~\cite{mckinney2010} is the reference library for tabular data analysis in Python,
+but it was designed for a single node and for data that fits in memory:
+
+\begin{itemize}
+  \item \textbf{Everything in memory.} It loads the whole dataset into RAM before operating.
+  If it does not fit, the process ends with \texttt{MemoryError} or the operating system
+  kills it.
+  \item \textbf{Eager execution.} Each operation runs immediately and creates complete
+  intermediate results; a \texttt{merge} may need both the original and the joined table at
+  the same time.
+  \item \textbf{One core.} Most operations use a single core, even on a multi-core machine.
+\end{itemize}
+
+pandas has its own mitigations: reading only some columns, using smaller data types or
+processing the file in parts (\emph{chunks}). The pandas documentation itself recommends
+them~\cite{pandasscale}. Section~\ref{sec:evidence} shows how far they go.
+
+% ---------------------------------------------------------------------------
+\section{Environment and configuration on Windows}
+
+\subsection{Machines}
+
+All measurements ran on a single Windows machine, with the same configuration for pandas and
+Spark. The Linux machine was used only to develop and test the code.
+
+\begin{table}[H]
+\centering
+\caption{Machines and software versions.}
+\label{tab:environment}
+\begin{tabularx}{\textwidth}{lXX}
+\toprule
+ & Measurement machine & Development machine \\
+\midrule
+Operating system & Windows 11 Home & Debian 13 (Linux) \\
+Processor & AMD Ryzen 5 7520U, 4 cores and 8 threads & 16 threads \\
+RAM & 15.3 GB & 15.3 GB \\
+Free disk & 300 GB & 13 GB \\
+Python & 3.13.17 & 3.13.5 \\
+Java & Microsoft OpenJDK 17.0.21 & Temurin 17.0.18 \\
+\midrule
+PySpark & \multicolumn{2}{l}{4.3.0 (bundles Spark)} \\
+pandas / pyarrow / psutil & \multicolumn{2}{l}{3.1.1 / 26.0.1 / 7.2.2} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Installation}
+
+The full installation guide is in the repository's \texttt{README.md}. In short:
+
+\begin{enumerate}
+  \item Python 3.13 through \texttt{winget}, always invoked with the \texttt{py -3.13}
+  launcher.
+  \item JDK 17 through \texttt{winget}; the installer sets \texttt{JAVA\_HOME}.
+  \item \texttt{winutils.exe} and \texttt{hadoop.dll} from Hadoop 3.3.6 with the
+  \texttt{scripts/setup\_winutils.ps1} script, which checks their SHA-256 and sets
+  \texttt{HADOOP\_HOME}.
+  \item A virtual environment from \texttt{requirements.txt}, which pins exact versions.
+\end{enumerate}
+
+\texttt{SPARK\_HOME} is not needed: the \texttt{pyspark} package from PyPI bundles the full
+Spark distribution and locates it by itself. This is stated explicitly because the
+assignment mentions that variable.
+
+\subsection{Problems found and how they were solved}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Environment problems recorded in the project log.}
+\label{tab:problems}
+\begin{tabularx}{\textwidth}{XX}
+\toprule
+Problem & Solution \\
+\midrule
+Only Python 3.14 was installed, outside the range PySpark 4.3.0 supports (3.11--3.13), and the \texttt{python} command opened the Microsoft Store. &
+Install Python 3.13 with \texttt{winget} and always use \texttt{py -3.13}. \\
+There was no Java and no \texttt{JAVA\_HOME}. &
+Install Microsoft OpenJDK 17 with \texttt{winget}, which asks for elevation and sets the variable. \\
+Writing Parquet failed: first because \texttt{HADOOP\_HOME} was missing, then with \texttt{UnsatisfiedLinkError} because \texttt{hadoop.dll} was missing. &
+A script downloads \texttt{winutils.exe} and \texttt{hadoop.dll}, checks their SHA-256 and sets \texttt{HADOOP\_HOME} and \texttt{PATH} without administrator rights. \\
+The script itself did not start on PowerShell 5.1: a syntax error in \texttt{"\$name: ..."} and broken accents when reading UTF-8 without a BOM. &
+Use \texttt{"\$\{name\}: ..."}, save with a BOM and add an automated test that checks the script syntax. \\
+PySpark 4.3.0 warns that it does not fully support pandas 3. &
+No effect on the tests; pandas 3.1.1 is kept so that the measurements already taken stay valid. \\
+Downloads of large files could not be resumed: a network drop meant starting over. &
+\pending{describe the fix applied in task T1.} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{Source code analysis}
+
+\subsection{Organization}
+
+The repository separates what is delivered from what is measured:
+
+\begin{itemize}
+  \item \texttt{pandas\_version/analysis.py} and \texttt{spark\_version/analysis.py} contain
+  the same six operations, one function per operation, with the same names.
+  \item \texttt{spark\_version/optimized.py} reuses those Spark functions and only changes
+  \emph{how} they run.
+  \item \texttt{benchmark/} imports those same functions to measure them. What is measured is
+  exactly what is delivered.
+  \item \texttt{tests/} checks that pandas and Spark produce the same results on the same
+  data.
+\end{itemize}
+
+The shared rules are written down in a contract
+(\texttt{docs/CONTRATO\_ANALISIS\_amazon\_hk.md}): same columns, same cleaning rules, same
+weekday numbering and a $10^{-4}$ tolerance on means and standard deviations.
+
+\subsection{Reading}
+
+Spark reads with an \textbf{explicit schema}. Without it, Spark would have to scan the file
+once just to infer each column's type, which over tens of gigabytes is a full extra pass.
+
+\begin{lstlisting}[caption={Explicit catalog schema in Spark.}]
+META_SCHEMA = StructType([
+    StructField("parent_asin", StringType(), True),
+    StructField("store", StringType(), True),
+    StructField("price", DoubleType(), True),
+    # ... other catalog columns
+])
+spark.read.schema(META_SCHEMA).json(str(meta_path)) \
+    .filter(F.col("parent_asin").isNotNull()) \
+    .dropDuplicates(["parent_asin"])
+\end{lstlisting}
+
+Nothing is loaded yet at this point: reading is a transformation. pandas, instead, loads the
+whole file into memory as soon as \texttt{read\_parquet} is called.
+
+\subsection{Cleaning}
+
+Both versions apply the same three rules: drop rows with nulls in the key columns, keep
+ratings between 1 and 5, and keep positive timestamps.
+
+\begin{lstlisting}[caption={Cleaning in pandas (top) and Spark (bottom).}]
+cleaned = reviews.dropna(subset=["user_id", "parent_asin", "rating", "timestamp"])
+cleaned = cleaned[(cleaned["rating"] >= 1) & (cleaned["rating"] <= 5)
+                  & (cleaned["timestamp"] > 0)]
+
+reviews.dropna(subset=["user_id", "parent_asin", "rating", "timestamp"]) \
+    .filter((F.col("rating") >= 1) & (F.col("rating") <= 5) & (F.col("timestamp") > 0))
+\end{lstlisting}
+
+The syntax is almost the same, but the effect is not: pandas creates a filtered copy of the
+whole table right away, while Spark only adds a step to the plan. That step runs later,
+partition by partition, and the optimizer places it as close to the read as possible.
+
+\subsection{Derived columns}
+
+Both versions turn the timestamp (milliseconds since 1970, in UTC) into year, month, weekday
+and hour. The delicate detail is the \textbf{weekday}: pandas numbers it from 0 (Monday) to
+6 (Sunday) and Spark from 1 (Sunday) to 7 (Saturday). pandas is aligned with Spark:
+
+\begin{lstlisting}[caption={Converting the pandas weekday to Spark's numbering.}]
+derived["review_dow"] = ((review_ts.dt.dayofweek + 1) % 7) + 1
+# Monday: ((0 + 1) % 7) + 1 = 2   -> same as Spark
+# Sunday: ((6 + 1) % 7) + 1 = 1   -> same as Spark
+\end{lstlisting}
+
+Without this conversion the temporal table would differ between engines even though both
+were correctly written. An automated test checks all seven days.
+
+\subsection{Join with the catalog}
+
+It is a \textbf{left} join on \texttt{parent\_asin}: every review is kept, and those whose
+product is missing from the catalog get an empty store. They are not dropped, because they
+answer question~5.
+
+\begin{lstlisting}[caption={Join in pandas, baseline Spark and optimized Spark.}]
+reviews.merge(catalog, on="parent_asin", how="left")          # pandas
+reviews.join(catalog, "parent_asin", "left")                  # baseline Spark
+reviews.join(F.broadcast(catalog), "parent_asin", "left")     # optimized Spark
+\end{lstlisting}
+
+In pandas, \texttt{merge} builds the full joined table in memory; it is the most
+memory-hungry step. In baseline Spark, the join requires a shuffle of both tables by
+\texttt{parent\_asin}. In the optimized version the catalog is reduced to two columns and
+broadcast to every executor, so the reviews are joined where they are, without moving them.
+
+\subsection{Aggregations}
+
+\begin{lstlisting}[caption={Store aggregate in pandas (top) and Spark (bottom).}]
+reviews.groupby("store", dropna=False).agg(
+    reviews=("parent_asin", "size"),
+    products=("parent_asin", "nunique"),
+    avg_rating=("rating", "mean"),
+    stddev_rating=("rating", "std"))
+
+reviews.groupBy("store").agg(
+    F.count("*").alias("reviews"),
+    F.countDistinct("parent_asin").alias("products"),
+    F.round(F.avg("rating"), 4).alias("avg_rating"),
+    F.round(F.stddev("rating"), 4).alias("stddev_rating"))
+\end{lstlisting}
+
+Two decisions make them agree:
+
+\begin{itemize}
+  \item \texttt{dropna=False} in pandas keeps the group of reviews with no store. Spark keeps
+  the null group by default; pandas would drop it without that option.
+  \item The standard deviation is the \textbf{sample} one in both: pandas \texttt{std} and
+  Spark \texttt{stddev} divide by $n-1$.
+\end{itemize}
+
+In Spark, a \texttt{groupBy} runs in two phases: each partition aggregates its own rows, the
+partial results are shuffled, and then they are combined. Only partial results move, not the
+original rows.
+
+\subsection{Writing}
+
+pandas writes one Parquet file per table. Spark writes a \emph{folder} with one file per
+partition, because each task writes its own part in parallel. Since the aggregated tables
+are small, the optimized version applies \texttt{coalesce(1)} to leave one file per table.
+
+Writing is also the \textbf{action} that triggers all the previous computation. That is why,
+in the per-operation measurements, Spark's write time includes the reading, cleaning, join
+and aggregations that until then were only planned.
+
+\subsection{Optimized version and its relation to the DAG}
+
+\texttt{spark\_version/optimized.py} reuses the functions above and changes the execution in
+five points, plus an optional cache. Each one can be switched on or off from the command
+line to measure its effect.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Optimizations of the Spark version and the concept each applies.}
+\label{tab:optimizations}
+\begin{tabularx}{\textwidth}{lXl}
+\toprule
+Optimization & What changes & Concept \\
+\midrule
+Read 4 columns & Parquet does not read the other columns from disk & Columnar format \\
+Temporal table without join & The temporal table uses no catalog column; it is computed without the join & DAG: one shuffle less \\
+Broadcast join & The catalog, reduced to 2 columns, is copied to every executor & Broadcast join \\
+Shuffle partitions & 2 per core instead of 200 & Partitions \\
+One file per table & \texttt{coalesce(1)} before writing & Partitions \\
+Cache (off) & Would keep the cleaned reviews for both aggregations & Caching \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The effect is visible in the physical plan Spark builds before running (\texttt{explain}).
+For the store table, the join appears as \texttt{BroadcastHashJoin} and the read asks only
+for the needed columns:
+
+\begin{lstlisting}[language={},caption={Physical plan of the store table (optimized version).}]
+AdaptiveSparkPlan
++- HashAggregate                          <- combines the partial results
+   +- Exchange                            <- shuffle (new stage)
+      +- HashAggregate                    <- aggregates inside each partition
+         +- ...
+            +- BroadcastHashJoin LeftOuter BuildRight
+               :- Filter <- Scan parquet  (user_id, parent_asin, rating, timestamp)
+               +- BroadcastExchange
+                  +- Filter <- Scan parquet  (parent_asin, store)
+\end{lstlisting}
+
+The plan of the temporal table contains no \emph{join} at all: only read, filter, projection
+and aggregation.
+
+In a test with 20 million synthetic reviews on the Linux machine, the optimized version
+produced tables identical to the baseline and took 25.7 to 26.1 seconds, against 27.1 to
+27.7 for the baseline. With the cache on it was slower (28.8 to 29.2 seconds): re-reading
+four Parquet columns cost less than storing 20 million rows in memory. That is why the cache
+is off by default. \pending{replace with the measurement on the Windows machine (task T4).}
+
+% ---------------------------------------------------------------------------
+\section{Evidence that pandas is not viable}
+\label{sec:evidence}
+
+\pending{depends on the measurement with the full-review file (tasks T1, T2 and T3): memory
+errors, times, Task Manager screenshots and the outcome of the pandas mitigations.}
+
+% ---------------------------------------------------------------------------
+\section{Comparative analysis: pandas versus Spark}
+
+\pending{tables and charts from the final measurement. The current charts, from the
+interactions CSV, are in \texttt{docs/graficos/}.}
+
+% ---------------------------------------------------------------------------
+\section{Conclusions}
+
+\pending{written from the results of Sections 5 and 6.}
+
+% ---------------------------------------------------------------------------
+\begin{thebibliography}{9}
+
+\bibitem{hou2024}
+Y.~Hou, J.~Li, X.~Fu, Z.~He, A.~Yan, X.~Chen, and J.~McAuley, ``Bridging language and items
+for retrieval and recommendation: Benchmarking LLMs as semantic encoders,'' \emph{arXiv
+preprint arXiv:2403.03952v2}, 2024.
+
+\bibitem{zaharia2016}
+M.~Zaharia \emph{et al.}, ``Apache Spark: A unified engine for big data processing,''
+\emph{Communications of the ACM}, vol.~59, no.~11, pp.~56--65, 2016.
+
+\bibitem{armbrust2015}
+M.~Armbrust \emph{et al.}, ``Spark SQL: Relational data processing in Spark,'' in
+\emph{Proc. ACM \mbox{SIGMOD} International Conference on Management of Data}, 2015,
+pp.~1383--1394.
+
+\bibitem{mckinney2010}
+W.~McKinney, ``Data structures for statistical computing in Python,'' in \emph{Proc. 9th
+Python in Science Conference (SciPy)}, 2010, pp.~56--61.
+
+\bibitem{chambers2018}
+B.~Chambers and M.~Zaharia, \emph{Spark: The Definitive Guide: Big Data Processing Made
+Simple}. Sebastopol, CA, USA:
+O'Reilly Media, 2018.
+
+\bibitem{sparkdocs}
+The Apache Software Foundation, ``Spark SQL and DataFrames,'' Apache Spark 4.3.0
+documentation. [Online]. Available:
+\url{https://spark.apache.org/docs/4.3.0/sql-programming-guide.html}. Accessed: Nov. 17,
+2026.
+
+\bibitem{parquet}
+The Apache Software Foundation, ``Documentation,'' Apache Parquet. [Online]. Available:
+\url{https://parquet.apache.org/docs/}. Accessed: Nov. 17, 2026.
+
+\bibitem{pandasscale}
+pandas development team, ``Scaling to large datasets,'' pandas 3.1.1 documentation.
+[Online]. Available: \url{https://pandas.pydata.org/docs/user_guide/scale.html}.
+Accessed: Nov. 17, 2026.
+
+\end{thebibliography}
+
+\end{document}

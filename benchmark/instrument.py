@@ -31,6 +31,54 @@ def process_tree_rss_mb(root_pid: int | None = None) -> float:
     return total / (1024**2)
 
 
+def process_tree_private_mb(root_pid: int) -> float:
+    """Total private (committed) memory of a process tree, in MB.
+
+    The honest number when a process is dying under memory pressure: Windows
+    trims the working set (RSS) of a thrashing process to nearly zero, while
+    its private bytes still show what it had actually grabbed. Falls back to
+    RSS where the platform does not report private bytes.
+    """
+    try:
+        root = psutil.Process(root_pid)
+    except psutil.NoSuchProcess:
+        return 0.0
+    total = 0
+    for process in [root, *root.children(recursive=True)]:
+        try:
+            info = process.memory_info()
+            total += getattr(info, "private", info.rss)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return total / (1024**2)
+
+
+def wait_for_memory_headroom(
+    min_available_mb: int = 2048,
+    max_percent: float = 85.0,
+    max_wait_s: int = 600,
+    poll_s: float = 2.0,
+) -> float:
+    """Wait until the system has memory headroom again; return seconds waited.
+
+    A run killed for memory pressure leaves the machine saturated for a while.
+    Starting the next run right away would make it trip the same guard before
+    it has allocated anything, producing fake measurements. This is the
+    cooldown between runs.
+    """
+    deadline = time.time() + max_wait_s
+    started = time.time()
+    while time.time() < deadline:
+        memory = psutil.virtual_memory()
+        if (
+            memory.percent < max_percent
+            and memory.available >= min_available_mb * 1024**2
+        ):
+            return round(time.time() - started, 1)
+        time.sleep(poll_s)
+    return round(time.time() - started, 1)
+
+
 class PeakRssSampler(threading.Thread):
     """Poll process-tree RSS in the background and keep the peak and a series."""
 
@@ -167,6 +215,7 @@ def run_with_limits(
             log_handle.close()
     kill_reason = None
     tree_mb_at_kill = None
+    tree_private_mb_at_kill = None
     deadline = time.time() + timeout_s
     while process.poll() is None:
         if time.time() >= deadline:
@@ -185,6 +234,7 @@ def run_with_limits(
         time.sleep(poll_s)
     if kill_reason:
         tree_mb_at_kill = round(process_tree_rss_mb(process.pid), 1)
+        tree_private_mb_at_kill = round(process_tree_private_mb(process.pid), 1)
         kill_process_tree(process.pid)
         try:
             process.wait(timeout=30)
@@ -194,6 +244,7 @@ def run_with_limits(
         "returncode": process.returncode,
         "kill_reason": kill_reason,
         "tree_mb_at_kill": tree_mb_at_kill,
+        "tree_private_mb_at_kill": tree_private_mb_at_kill,
     }
 
 

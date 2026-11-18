@@ -11,7 +11,11 @@ import sys
 import time
 from types import SimpleNamespace
 
-from benchmark.instrument import measure_operation, run_with_limits
+from benchmark.instrument import (
+    measure_operation,
+    run_with_limits,
+    wait_for_memory_headroom,
+)
 
 
 def test_timeout_kills_the_child_and_records_the_reason(tmp_path):
@@ -27,6 +31,8 @@ def test_timeout_kills_the_child_and_records_the_reason(tmp_path):
     # The runaway process' own memory is part of the recorded outcome.
     assert outcome["tree_mb_at_kill"] is not None
     assert outcome["tree_mb_at_kill"] > 0
+    assert outcome["tree_private_mb_at_kill"] is not None
+    assert outcome["tree_private_mb_at_kill"] >= 0
 
 
 def test_memory_limit_kills_the_child_and_records_the_reason(
@@ -67,3 +73,26 @@ def test_measured_action_records_memory_mean_and_series():
     assert step["peak_mb"] >= step["rss_mean_mb"]
     assert len(step["rss_series_mb"]) >= 1
     assert {"t_s", "mb"} <= set(step["rss_series_mb"][0])
+
+
+def test_memory_headroom_returns_immediately_when_healthy(monkeypatch):
+    monkeypatch.setattr(
+        "benchmark.instrument.psutil.virtual_memory",
+        lambda: SimpleNamespace(percent=50.0, available=8 * 1024**3),
+    )
+    assert wait_for_memory_headroom(poll_s=0.01) < 1.0
+
+
+def test_memory_headroom_waits_until_the_system_recovers(monkeypatch):
+    states = iter(
+        [
+            SimpleNamespace(percent=97.0, available=100 * 1024**2),
+            SimpleNamespace(percent=60.0, available=4 * 1024**3),
+        ]
+    )
+    monkeypatch.setattr(
+        "benchmark.instrument.psutil.virtual_memory",
+        lambda: next(states),
+    )
+    waited = wait_for_memory_headroom(poll_s=0.01)
+    assert waited >= 0.0  # returned only after the recovery sample

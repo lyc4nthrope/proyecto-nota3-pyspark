@@ -51,9 +51,12 @@ def measure_attempt(timeout: int) -> dict:
         )
         if outcome["kill_reason"]:
             detail = outcome["kill_reason"]
-            if outcome.get("tree_mb_at_kill") is not None:
+            private = outcome.get("tree_private_mb_at_kill")
+            resident = outcome.get("tree_mb_at_kill")
+            if private is not None:
                 detail += (
-                    f"; process tree {outcome['tree_mb_at_kill']} MB at kill"
+                    f"; process tree {private} MB private "
+                    f"({resident} MB resident) at kill"
                 )
             raise RuntimeError(detail)
         tail = [

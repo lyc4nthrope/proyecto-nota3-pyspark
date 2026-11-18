@@ -40,7 +40,7 @@ from benchmark.config import (
     RAW_TEXT_FACTS,
     REVIEW_RAW,
 )
-from benchmark.instrument import run_with_limits
+from benchmark.instrument import run_with_limits, wait_for_memory_headroom
 from benchmark.pandas_runner import pandas_environment_info, run_pandas_analysis
 from benchmark.runner import environment_info, run_analysis
 from spark_version.session import build_spark_session
@@ -255,6 +255,9 @@ def _spawn_run(
     ]
     if plan["raw"]:
         command.append("--raw")
+    waited = wait_for_memory_headroom()
+    if waited > 1:
+        print(f"[guard] waited {waited}s for memory headroom", flush=True)
     out_dir = runs_dir(plan["label"])
     out_dir.mkdir(parents=True, exist_ok=True)
     run_path = out_dir / f"{engine}_{ladder.level_tag(fraction)}_r{rep}.json"
@@ -271,9 +274,12 @@ def _spawn_run(
             print(f"  {line}", flush=True)
     if outcome["kill_reason"]:
         error_text = outcome["kill_reason"]
-        if outcome.get("tree_mb_at_kill") is not None:
+        private = outcome.get("tree_private_mb_at_kill")
+        resident = outcome.get("tree_mb_at_kill")
+        if private is not None:
             error_text += (
-                f"; process tree {outcome['tree_mb_at_kill']} MB at kill"
+                f"; process tree {private} MB private "
+                f"({resident} MB resident) at kill"
             )
         payload = {
             "label": plan["label"],

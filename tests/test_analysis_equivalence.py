@@ -11,6 +11,13 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
+from pyspark.sql.types import (
+    DoubleType,
+    LongType,
+    StringType,
+    StructField,
+    StructType,
+)
 
 from benchmark import ladder
 from pandas_version import analysis as pandas_analysis
@@ -20,15 +27,32 @@ from spark_version.session import build_spark_session
 # 2021-03-07 12:34:56 UTC is a Sunday: Spark's dayofweek for it is 1.
 SUNDAY_MS = 1615120496000
 
+FIXTURE_SCHEMA = StructType(
+    [
+        StructField("user_id", StringType(), True),
+        StructField("parent_asin", StringType(), True),
+        StructField("rating", DoubleType(), True),
+        StructField("timestamp", LongType(), True),
+        StructField("text", StringType(), True),
+    ]
+)
+
 REVIEW_ROWS = [
-    {"user_id": "u1", "parent_asin": "p1", "rating": 5.0, "timestamp": SUNDAY_MS},
-    {"user_id": "u2", "parent_asin": "p1", "rating": 3.0, "timestamp": SUNDAY_MS},
-    {"user_id": "u3", "parent_asin": "p2", "rating": 4.0, "timestamp": SUNDAY_MS + 3_600_000},
-    {"user_id": "u4", "parent_asin": "p3", "rating": 2.0, "timestamp": SUNDAY_MS + 7_200_000},
+    {"user_id": "u1", "parent_asin": "p1", "rating": 5.0, "timestamp": SUNDAY_MS,
+     "text": "producto excelente, muy recomendable"},
+    {"user_id": "u2", "parent_asin": "p1", "rating": 3.0, "timestamp": SUNDAY_MS,
+     "text": "regular"},
+    {"user_id": "u3", "parent_asin": "p2", "rating": 4.0, "timestamp": SUNDAY_MS + 3_600_000,
+     "text": None},
+    {"user_id": "u4", "parent_asin": "p3", "rating": 2.0, "timestamp": SUNDAY_MS + 7_200_000,
+     "text": "malo"},
     # These three must be dropped by the cleaning rules.
-    {"user_id": "u5", "parent_asin": "p2", "rating": 6.0, "timestamp": SUNDAY_MS},
-    {"user_id": "u6", "parent_asin": "p2", "rating": 4.0, "timestamp": 0},
-    {"user_id": None, "parent_asin": "p2", "rating": 4.0, "timestamp": SUNDAY_MS},
+    {"user_id": "u5", "parent_asin": "p2", "rating": 6.0, "timestamp": SUNDAY_MS,
+     "text": "fuera de rango"},
+    {"user_id": "u6", "parent_asin": "p2", "rating": 4.0, "timestamp": 0,
+     "text": "sin fecha"},
+    {"user_id": None, "parent_asin": "p2", "rating": 4.0, "timestamp": SUNDAY_MS,
+     "text": "sin usuario"},
 ]
 
 CATALOG_ROWS = [
@@ -62,7 +86,7 @@ def _pandas_path(tmp_path):
 
 
 def _spark_path(spark, tmp_path):
-    reviews = spark.createDataFrame(pd.DataFrame(REVIEW_ROWS), schema=spark_analysis.REVIEW_SCHEMA)
+    reviews = spark.createDataFrame(pd.DataFrame(REVIEW_ROWS), schema=FIXTURE_SCHEMA)
     catalog = spark.createDataFrame(pd.DataFrame(CATALOG_ROWS), schema=spark_analysis.META_SCHEMA)
     catalog_path = tmp_path / "catalog_spark.parquet"
     catalog.select(*spark_analysis.CATALOG_COLUMNS).write.mode(
@@ -159,6 +183,28 @@ def test_store_aggregates_match(spark, tmp_path):
     _assert_close(
         pandas_aggregate["stddev_rating"], spark_aggregate["stddev_rating"]
     )
+    _assert_close(
+        pandas_aggregate["avg_text_length"], spark_aggregate["avg_text_length"]
+    )
+
+
+def test_text_length_matches_between_engines(spark, tmp_path):
+    pandas_derived, _ = _pandas_path(tmp_path)
+    spark_derived, _ = _spark_path(spark, tmp_path)
+    expected = [
+        len(row["text"]) if row["text"] else 0 for row in REVIEW_ROWS[:4]
+    ]
+    pandas_lengths = (
+        pandas_derived.sort_values(["timestamp", "user_id"])["text_length"]
+        .tolist()
+    )
+    spark_lengths = [
+        row["text_length"]
+        for row in spark_derived.orderBy("timestamp", "user_id")
+        .select("text_length")
+        .collect()
+    ]
+    assert pandas_lengths == spark_lengths == expected
 
 
 def test_time_aggregates_match(spark, tmp_path):
@@ -178,6 +224,9 @@ def test_time_aggregates_match(spark, tmp_path):
         assert pandas_aggregate[key].tolist() == spark_aggregate[key].tolist()
     assert pandas_aggregate["reviews"].tolist() == spark_aggregate["reviews"].tolist()
     _assert_close(pandas_aggregate["avg_rating"], spark_aggregate["avg_rating"])
+    _assert_close(
+        pandas_aggregate["avg_text_length"], spark_aggregate["avg_text_length"]
+    )
 
 
 def test_ladder_hash_filter_is_deterministic_and_scales(spark):

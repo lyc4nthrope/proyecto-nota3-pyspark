@@ -270,3 +270,40 @@ pandas cae de 15x a 1,5x y Spark ya usa menos memoria desde el 50 %—, pero
 es justo lo que la rúbrica castiga. El marco de pandas al 100 % ocupa 12,2 GB
 en un equipo de 15,3 GB, así que está al límite, pero no falla. Decisión
 pendiente sobre cómo asegurar el volumen (punto 5 del contrato).
+
+### 2026-11-18 — Escalera con texto: pandas no termina (evidencia de T1)
+
+**Qué se hizo.** Ruta completa con el JSONL crudo (31,41 GB, 67,4 M reseñas
+con texto): descarga reanudable, conversión única a Parquet con esquema
+explícito (9,72 GB), `text_length`/`avg_text_length` en ambos motores y
+escalera 1/10/50/100 % con la política de repeticiones corregida.
+
+**Resultado (medias de 3 repeticiones; Spark al 50/100 % con 1, según lo
+acordado por plazo):**
+
+| Nivel | Filas | pandas | Spark |
+|---|---|---|---|
+| 1 % | 673.379 | 4,7 s · 1,3 GB — termina | 52,7 s · 3,8 GB — termina |
+| 10 % | 6.742.408 | 27,8 s · 4,7 GB — termina | 106,8 s · 4,2 GB — termina |
+| 50 % | 33.706.117 | **matado al 97–98 % de RAM** (~13 GB privados al caer) | 433,3 s · 5,3 GB — termina |
+| 100 % | 67.409.944 | **matado al 98–99 % de RAM** (~14 GB privados al caer) | 705,7 s · 5,9 GB — termina |
+
+**Intento ingenuo:** `pd.read_json` sobre los 31 GB comprometió **30,3 GB de
+memoria privada en 20 segundos** antes de que el sistema cortara al 98 % de
+RAM. Ese es el error textual registrado que pedía la tarea.
+
+**Validación lógica:** equivalencia **9/9 pares idénticos** entre motores al
+1 % y 10 % (mismos grupos, mismo top-1), y en todas las corridas terminadas:
+0 descartes por limpieza y 0 filas sin catálogo.
+
+**Dos defectos del propio instrumento, encontrados y corregidos midiendo:**
+las repeticiones arrancaban con el sistema todavía saturado (el guardia mataba
+recién nacidas, con árboles de 1,9 MB) y el corte registraba el residente,
+que Windows recorta a casi cero; ahora hay enfriamiento entre corridas y se
+registran bytes privados. Se rehizo todo lo tocado.
+
+**Conclusión para el informe:** con el texto en el análisis, pandas no es
+viable en el equipo de 15,3 GB ni al 50 %; Spark termina el 100 % con ~6 GB
+de pico. La comparación honesta de tiempos donde ambos terminan muestra a
+pandas más rápido en pequeño (4,7 s vs 52,7 s al 1 %), con la ventaja
+reduciéndose al crecer los datos.

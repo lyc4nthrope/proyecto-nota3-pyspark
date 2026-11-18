@@ -66,7 +66,12 @@ def clean_reviews(reviews: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_derived_columns(reviews: pd.DataFrame) -> pd.DataFrame:
-    """Add the date parts the temporal questions need, from the millisecond timestamp."""
+    """Add the date parts the temporal questions need, plus text_length.
+
+    ``text_length`` is the number of characters of ``text`` (0 when the text
+    is null or the source has no text column at all), matching Spark's
+    ``coalesce(length(text), 0)``.
+    """
     derived = reviews.copy()
     # UTC because the Spark session is pinned to UTC; made naive to match it.
     review_ts = pd.to_datetime(
@@ -78,6 +83,10 @@ def add_derived_columns(reviews: pd.DataFrame) -> pd.DataFrame:
     derived["review_month"] = review_ts.dt.month
     derived["review_dow"] = ((review_ts.dt.dayofweek + 1) % 7) + 1
     derived["review_hour"] = review_ts.dt.hour
+    if "text" in derived.columns:
+        derived["text_length"] = derived["text"].fillna("").str.len().astype("int64")
+    else:
+        derived["text_length"] = 0
     return derived
 
 
@@ -89,20 +98,22 @@ def join_with_catalog(
 
 
 def aggregate_by_store(reviews: pd.DataFrame) -> pd.DataFrame:
-    """Volume and rating quality per store (the group-by question)."""
+    """Volume, rating quality and text size per store (the group-by question)."""
     aggregated = reviews.groupby("store", dropna=False, sort=False).agg(
         reviews=("parent_asin", "size"),
         products=("parent_asin", "nunique"),
         avg_rating=("rating", "mean"),
         stddev_rating=("rating", "std"),
+        avg_text_length=("text_length", "mean"),
     ).reset_index()
     aggregated["avg_rating"] = aggregated["avg_rating"].round(4)
     aggregated["stddev_rating"] = aggregated["stddev_rating"].round(4)
+    aggregated["avg_text_length"] = aggregated["avg_text_length"].round(4)
     return aggregated
 
 
 def aggregate_by_time(reviews: pd.DataFrame) -> pd.DataFrame:
-    """Volume and rating quality per year/month/weekday (the temporal question)."""
+    """Volume, rating quality and text size per year/month/weekday."""
     aggregated = reviews.groupby(
         ["review_year", "review_month", "review_dow"],
         dropna=False,
@@ -111,9 +122,11 @@ def aggregate_by_time(reviews: pd.DataFrame) -> pd.DataFrame:
         reviews=("parent_asin", "size"),
         avg_rating=("rating", "mean"),
         stddev_rating=("rating", "std"),
+        avg_text_length=("text_length", "mean"),
     ).reset_index()
     aggregated["avg_rating"] = aggregated["avg_rating"].round(4)
     aggregated["stddev_rating"] = aggregated["stddev_rating"].round(4)
+    aggregated["avg_text_length"] = aggregated["avg_text_length"].round(4)
     return aggregated
 
 

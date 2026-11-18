@@ -640,6 +640,35 @@ lazy evaluation without caching.
 \label{fig:ops}
 \end{figure}
 
+\subsection{Code complexity and readability}
+
+\begin{table}[H]
+\centering
+\caption{Size of each version (code lines exclude blank lines, comments and docstrings).}
+\label{tab:loc}
+\begin{tabular}{lrr}
+\toprule
+Version & Code lines & Functions \\
+\midrule
+pandas baseline (\texttt{pandas\_version/analysis.py}) & 86 & 8 \\
+Spark baseline (\texttt{spark\_version/analysis.py}) & 108 & 8 \\
+Spark optimized (\texttt{spark\_version/optimized.py}) & 76 & 8 \\
+pandas mitigations (\texttt{pandas\_version/mitigated.py}) & 194 & 7 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Both baselines have the same eight functions and read almost one to one: a pandas
+\texttt{groupby}/\texttt{agg} becomes a Spark \texttt{groupBy}/\texttt{agg}. Spark needs about
+25\,\% more lines because its schemas are declared explicitly (\texttt{StructType}) and the
+date parts are built with column functions. The optimized version adds 76 lines and changes no
+transformation: it reuses the baseline functions and only changes \emph{how} Spark executes
+them (projection, broadcast hint, configuration), so readability is kept. The real cost in
+complexity appears when pandas has to go beyond memory: the chunked mitigation needs 194 lines
+of partial sums, sums of squares for the standard deviation, merging of accumulators and
+per-store ASIN sets, which is re-implementing by hand the partitioned aggregation that Spark
+does on its own.
+
 % ---------------------------------------------------------------------------
 \section{Conclusions}
 
@@ -659,6 +688,16 @@ lazy evaluation without caching.
   and 100\,\% because the text is part of the analysis, and chunks finish but 16 times slower
   and with part of the logic rewritten by hand. pandas is not viable \emph{even when mitigated}
   for this volume on this machine.
+  \item Relation to real cases: the pattern of this project, a large table of events (reviews,
+  orders, clicks, transactions) joined with a small dimension table (a product catalog) and
+  aggregated by group and by time, is the core of e-commerce analytics, recommendation
+  pipelines and business reporting. At the scale of a large retailer, with billions of events,
+  the data no longer fits one machine, and the same Spark code runs on a cluster by changing
+  only the master.
+  \item Limitations of this study: Spark was measured once at 50 and 100\,\% (three times at
+  1 and 10\,\%) because of the time each run takes; CPU usage was not recorded; everything ran
+  on one machine in local mode, so cluster scaling was not tested; and the one-pass time of the
+  baseline is an estimate (Section~6.1).
 \end{enumerate}
 
 % ---------------------------------------------------------------------------

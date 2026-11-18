@@ -658,6 +658,37 @@ un efecto directo de la evaluación perezosa sin caché.
 \label{fig:ops}
 \end{figure}
 
+\subsection{Complejidad y legibilidad del código}
+
+\begin{table}[H]
+\centering
+\caption{Tamaño de cada versión (las líneas de código excluyen líneas en blanco, comentarios
+y docstrings).}
+\label{tab:loc}
+\begin{tabular}{lrr}
+\toprule
+Versión & Líneas de código & Funciones \\
+\midrule
+pandas base (\texttt{pandas\_version/analysis.py}) & 86 & 8 \\
+Spark base (\texttt{spark\_version/analysis.py}) & 108 & 8 \\
+Spark optimizada (\texttt{spark\_version/optimized.py}) & 76 & 8 \\
+Mitigaciones pandas (\texttt{pandas\_version/mitigated.py}) & 194 & 7 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Las dos versiones base tienen las mismas ocho funciones y se leen casi una a una: un
+\texttt{groupby(...).agg(...)} de pandas es un \texttt{groupBy(...).agg(...)} de Spark. Spark
+necesita cerca de un 25\,\% más de líneas porque declara los esquemas explícitamente
+(\texttt{StructType}) y construye las partes de la fecha con funciones de columna. La versión
+optimizada agrega 76 líneas y no cambia ninguna transformación: reutiliza las funciones base y
+solo cambia \emph{cómo} las ejecuta Spark (proyección, pista de broadcast, configuración), así
+que la legibilidad se mantiene. El verdadero costo en complejidad aparece cuando pandas tiene
+que ir más allá de la memoria: la mitigación por \textit{chunks} necesita 194 líneas de sumas
+parciales, sumas de cuadrados para la desviación estándar, fusión de acumuladores y conjuntos
+de ASIN por tienda, es decir, reimplementar a mano la agregación por particiones que Spark hace
+por sí solo.
+
 % ---------------------------------------------------------------------------
 \section{Conclusiones}
 
@@ -677,6 +708,16 @@ un efecto directo de la evaluación perezosa sin caché.
   mueren al 50 y 100\,\% porque el texto es parte del análisis, y los \textit{chunks} terminan
   pero 16 veces más lento y con parte de la lógica reescrita a mano. pandas es inviable
   \emph{aun mitigado} para este volumen en este equipo.
+  \item Relación con casos reales: el patrón de este proyecto, una tabla grande de eventos
+  (reseñas, pedidos, clics, transacciones) unida a una tabla pequeña de dimensión (un catálogo
+  de productos) y agregada por grupo y por tiempo, es el núcleo de la analítica de comercio
+  electrónico, de los sistemas de recomendación y de los reportes de negocio. A la escala de un
+  gran minorista, con miles de millones de eventos, los datos ya no caben en una máquina, y el
+  mismo código de Spark corre en un clúster cambiando solo el \emph{master}.
+  \item Limitaciones de este estudio: Spark se midió una vez al 50 y al 100\,\% (tres veces al
+  1 y al 10\,\%) por el tiempo de cada corrida; no se registró el uso de CPU; todo corrió en una
+  sola máquina en modo local, así que no se probó la escalabilidad en clúster; y el tiempo de
+  una pasada de la base es una estimación (Sección~6.1).
 \end{enumerate}
 
 % ---------------------------------------------------------------------------

@@ -452,7 +452,9 @@ In a test with 20 million synthetic reviews on the Linux machine, the optimized 
 produced tables identical to the baseline and took 25.7 to 26.1 seconds, against 27.1 to
 27.7 for the baseline. With the cache on it was slower (28.8 to 29.2 seconds): re-reading
 four Parquet columns cost less than storing 20 million rows in memory. That is why the cache
-is off by default. \pending{replace with the measurement on the Windows machine (task T4).}
+is off by default. On the Windows machine, with the full 100\,\% sample (67.4 million reviews
+with text), the optimized version took \textbf{123.4 seconds} end to end and produced the same
+tables as the baseline: 67\,409\,944 rows, 375\,506 stores and 1\,985 time groups.
 
 % ---------------------------------------------------------------------------
 \section{Evidence that pandas is not viable}
@@ -505,8 +507,71 @@ memory it had committed; the dashed line is the machine's RAM.}
 \label{fig:memory}
 \end{figure}
 
-\pending{Task Manager screenshots (task T2) and the pandas mitigations table, technique by
-sample: finished / failed / timeout, time, peak memory (task T3).}
+\subsection{System screenshots}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{../../evidencia/capturas/pandas_fallo_memoria.png}
+\caption{Task Manager while pandas processes the 100\,\% sample: system RAM reaches 98\,\%.}
+\label{fig:shot-pandas}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{../../evidencia/capturas/pandas_error_terminal.png}
+\caption{The kill recorded in the terminal: system RAM at 98\,\% and 30\,305 MB of private
+memory committed.}
+\label{fig:shot-error}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{../../evidencia/capturas/spark_100_memoria.png}
+\caption{Spark finishing the 100\,\% sample with stable memory: the peak stays below 6 GB.}
+\label{fig:shot-spark}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{../../evidencia/capturas/spark_ui_dag.png}
+\caption{Spark UI (\texttt{localhost:4040}) during the 100\,\% run, showing the job plan.}
+\label{fig:shot-ui}
+\end{figure}
+
+\subsection{pandas mitigations}
+
+Before declaring pandas not viable, its own techniques were tried. All three were implemented
+(\path{pandas_version/mitigated.py}) and measured with the same instrument
+(\path{docs/evidencia/mitigaciones.csv}).
+
+\begin{table}[H]
+\centering
+\caption{pandas mitigations on the 100\,\% sample (67.4 million reviews with text).}
+\label{tab:mitigations}
+\begin{tabular}{llrr}
+\toprule
+Technique & Outcome & Time (s) & Peak (MB) \\
+\midrule
+Only the needed columns & killed at 98\,\% RAM & --- & 10\,663 \\
+Smaller dtypes & killed at 97\,\% RAM & --- & 10\,223 \\
+Chunks + partial aggregation & finishes & 3\,460 & 427$^{\ast}$ \\
+\bottomrule
+\end{tabular}
+\smallskip
+
+\footnotesize{$^{\ast}$Sets of ASINs per store that must stay alive to compute
+\texttt{products}. Spark builds both tables in 214.6 s (one pass).}
+\end{table}
+
+The first two techniques finish up to 10\,\% and die afterwards: the review text is a contract
+column (needed for \texttt{avg\_text\_length}), it cannot be dropped or narrowed, and its bytes
+are what fill the memory. Reading in chunks is the only technique that finishes 100\,\%, but at
+a price: 57.7 minutes against 3.6 for one Spark pass (about 16 times slower), keeping
+3\,734\,414 ASINs alive in per-store sets just to compute \texttt{products}, and with no way to
+express global operations (sorting 67 million rows, percentiles, windows) without reading
+everything again. None of them brings pandas to a practical 100\,\% run: either it does not
+finish, or it finishes sixteen times slower with part of the logic rewritten by hand
+\cite{pandasscale}.
 
 % ---------------------------------------------------------------------------
 \section{Comparative analysis: pandas versus Spark}
@@ -520,7 +585,8 @@ count the same work several times (52.7 s instead of 12.2 s at 1\,\%). One full 
 Spark pipeline is therefore the \texttt{write\_parquet} operation alone, which builds both
 tables from scratch. pandas is eager, so the sum of its steps is one pass. This is an
 estimate: when the write runs, the operating system already caches the input file.
-\pending{replace or confirm with the end-to-end run of \texttt{spark\_version.run} (task T4).}
+As a check, the optimized version run end to end on the 100\,\% sample took 123.4 seconds,
+below that one-pass estimate of the baseline.
 
 \begin{table}[H]
 \centering
@@ -555,6 +621,9 @@ Sample & pandas & Spark & Spark $\div$ pandas \\
   while Spark processes all 67.4 million reviews in about 3.6 minutes with less than 6 GB.
   \item \textbf{Same results.} Where both finish (1 and 10\,\%) the tables are identical:
   9 of 9 compared pairs, the same groups and the same top store, and 0 reviews without catalog.
+  \item \textbf{Optimizations have a break-even point.} The optimized version is 1.74 times
+  faster at 100\,\% (123.4 s against 214.6) but slower at 10\,\% (39.3 s against 32.3): the
+  broadcast and the column pruning do not pay for themselves with a few million rows.
 \end{itemize}
 
 Per operation (Figure~\ref{fig:ops}), pandas is faster at every in-memory step. The Spark bars
@@ -580,9 +649,13 @@ lazy evaluation without caching.
   \item Lazy evaluation matters when measuring: without caching, each action recomputes the
   whole plan, and summing per-step times overstates Spark's cost 2.7 to 4.3 times.
   \item The optimized version (column pruning, broadcast join, no join for the temporal table,
-  shuffle partitions sized to the machine) gives the same tables as the baseline.
-  \pending{its measured gain on Windows (task T4) and the outcome of the pandas
-  mitigations (task T3).}
+  shuffle partitions sized to the machine) gives the same tables as the baseline: 123.4 s
+  against 214.6 for one pass (1.74 times faster) at 100\,\%, although at small scale its cost
+  does not pay off.
+  \item The pandas mitigations are not enough: column selection and compact dtypes die at 50
+  and 100\,\% because the text is part of the analysis, and chunks finish but 16 times slower
+  and with part of the logic rewritten by hand. pandas is not viable \emph{even when mitigated}
+  for this volume on this machine.
 \end{enumerate}
 
 % ---------------------------------------------------------------------------

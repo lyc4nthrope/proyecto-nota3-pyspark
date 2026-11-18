@@ -19,13 +19,17 @@ SUNDAY_MS = 1615120496000  # 2021-03-07 12:34:56 UTC
 
 REVIEWS = pd.DataFrame(
     [
-        {"user_id": "u1", "parent_asin": "p1", "rating": 5.0, "timestamp": SUNDAY_MS},
-        {"user_id": "u2", "parent_asin": "p1", "rating": 3.0, "timestamp": SUNDAY_MS},
-        {"user_id": "u3", "parent_asin": "p2", "rating": 4.0, "timestamp": SUNDAY_MS + 3_600_000},
-        {"user_id": "u4", "parent_asin": "p3", "rating": 2.0, "timestamp": SUNDAY_MS + 86_400_000},
-        {"user_id": "u7", "parent_asin": "p9", "rating": 1.0, "timestamp": SUNDAY_MS},  # not in catalog
-        {"user_id": "u5", "parent_asin": "p2", "rating": 6.0, "timestamp": SUNDAY_MS},  # dropped
-        {"user_id": "u6", "parent_asin": "p2", "rating": 4.0, "timestamp": 0},  # dropped
+        {"user_id": "u1", "parent_asin": "p1", "rating": 5.0, "timestamp": SUNDAY_MS, "text": "great"},
+        {"user_id": "u2", "parent_asin": "p1", "rating": 3.0, "timestamp": SUNDAY_MS, "text": None},
+        {"user_id": "u3", "parent_asin": "p2", "rating": 4.0, "timestamp": SUNDAY_MS + 3_600_000,
+         "text": "ok"},
+        {"user_id": "u4", "parent_asin": "p3", "rating": 2.0, "timestamp": SUNDAY_MS + 86_400_000,
+         "text": "bad product"},
+        {"user_id": "u7", "parent_asin": "p9", "rating": 1.0, "timestamp": SUNDAY_MS,
+         "text": "no"},  # not in catalog
+        {"user_id": "u5", "parent_asin": "p2", "rating": 6.0, "timestamp": SUNDAY_MS,
+         "text": "x"},  # dropped
+        {"user_id": "u6", "parent_asin": "p2", "rating": 4.0, "timestamp": 0, "text": "y"},  # dropped
     ]
 )
 CATALOG = pd.DataFrame(
@@ -58,8 +62,12 @@ def inputs(tmp_path):
 
 
 def _baseline_tables(spark, reviews_path, catalog_path, tables_dir):
-    """Run the unoptimized functions exactly as the baseline does, and read its tables."""
-    reviews = spark.read.schema(analysis.REVIEW_SCHEMA).parquet(str(reviews_path))
+    """Run the unoptimized functions exactly as the baseline does, and read its tables.
+
+    Like benchmark/runner.py, the sample is read with its own schema, so the
+    ``text`` column (when present) reaches text_length.
+    """
+    reviews = spark.read.parquet(str(reviews_path))
     derived = analysis.add_derived_columns(analysis.clean_reviews(reviews))
     joined = analysis.join_with_catalog(derived, analysis.load_catalog(spark, catalog_path))
     analysis.write_outputs(
@@ -159,13 +167,36 @@ def test_time_plan_has_no_join(spark, inputs):
 
 def test_reviews_are_read_with_only_the_needed_columns(spark, inputs):
     reviews_path, _ = inputs
-    wide = REVIEWS.assign(text="long review text", title="t")
+    wide = REVIEWS.assign(title="t", images="[]")
     wide.to_parquet(reviews_path, index=False)
 
     plan = optimized.physical_plan(optimized.read_reviews(spark, reviews_path))
 
     read_schema = next(line for line in plan.splitlines() if "ReadSchema" in line)
-    assert "text" not in read_schema and "title" not in read_schema
+    assert "title" not in read_schema and "images" not in read_schema
+    # text is needed for avg_text_length, so it must still be read.
+    assert "text:" in read_schema
+
+
+def test_average_text_length_is_computed(spark, inputs, tmp_path):
+    reviews_path, catalog_path = inputs
+
+    optimized.run_optimized(spark, reviews_path, catalog_path, tmp_path / "out")
+
+    store = pd.read_parquet(tmp_path / "out" / "agg_by_store.parquet").set_index("store")
+    # ACME keeps u1 "great" (5), u2 null (0) and u3 "ok" (2): (5 + 0 + 2) / 3.
+    assert store.loc["ACME", "avg_text_length"] == pytest.approx(round(7 / 3, 4))
+    assert store.loc["BEST", "avg_text_length"] == 11
+
+
+def test_source_without_text_gives_zero_text_length(spark, inputs, tmp_path):
+    reviews_path, catalog_path = inputs
+    REVIEWS.drop(columns="text").to_parquet(reviews_path, index=False)
+
+    optimized.run_optimized(spark, reviews_path, catalog_path, tmp_path / "out")
+
+    by_time = pd.read_parquet(tmp_path / "out" / "agg_by_time.parquet")
+    assert (by_time["avg_text_length"] == 0).all()
 
 
 def test_cache_is_used_when_enabled(spark, inputs):

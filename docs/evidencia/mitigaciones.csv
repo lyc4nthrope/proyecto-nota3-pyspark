@@ -1,0 +1,13 @@
+technique,level,rows,status,seconds,peak_tree_mb,frames_mb,notes
+columns,1pct,673379,termino,5.299,,"{""read"": 165.4, ""derived"": 211.6, ""joined"": 251.7}","text is a contract column, so it cannot be dropped"
+dtypes,1pct,673379,termino,7.295,,"{""read"": 162.8, ""derived"": 202.0, ""joined"": 227.7}",text cannot be narrowed: its bytes are the data
+chunks,1pct,750000,termino,67.062,,"{""asin_sets"": 36.8}","exact products needs 321,585 ASINs alive as sets per store; global operations (sort, percentiles, windows) cannot be chunked"
+columns,10pct,6742408,termino,25.778,,"{""read"": 1654.7, ""derived"": 2117.6, ""joined"": 2519.5}","text is a contract column, so it cannot be dropped"
+dtypes,10pct,6742408,termino,20.305,,"{""read"": 1629.0, ""derived"": 2021.2, ""joined"": 2220.6}",text cannot be narrowed: its bytes are the data
+chunks,10pct,6750000,termino,835.693,,"{""asin_sets"": 141.0}","exact products needs 1,231,703 ASINs alive as sets per store; global operations (sort, percentiles, windows) cannot be chunked"
+columns,50pct,33706117,killed at system RAM 99% (available 152 MB),,11465.0,{},killed at system RAM 99% (available 152 MB)
+dtypes,50pct,33706117,killed at system RAM 98% (available 259 MB),,11568.6,{},killed at system RAM 98% (available 259 MB)
+chunks,50pct,33750000,termino,2401.499,,"{""asin_sets"": 314.8}","exact products needs 2,750,365 ASINs alive as sets per store; global operations (sort, percentiles, windows) cannot be chunked"
+columns,100pct,67409944,killed at system RAM 98% (available 293 MB),,10663.0,{},killed at system RAM 98% (available 293 MB)
+dtypes,100pct,67409944,killed at system RAM 97% (available 503 MB),,10222.9,{},killed at system RAM 97% (available 503 MB)
+chunks,100pct,67409944,termino,3459.839,,"{""asin_sets"": 427.4}","exact products needs 3,734,414 ASINs alive as sets per store; global operations (sort, percentiles, windows) cannot be chunked"

@@ -307,3 +307,24 @@ viable en el equipo de 15,3 GB ni al 50 %; Spark termina el 100 % con ~6 GB
 de pico. La comparación honesta de tiempos donde ambos terminan muestra a
 pandas más rápido en pequeño (4,7 s vs 52,7 s al 1 %), con la ventaja
 reduciéndose al crecer los datos.
+
+### 2026-11-18 — T3: mitigaciones de pandas, ninguna basta
+
+**Qué se hizo.** Las tres técnicas que exige el enunciado antes de declarar la
+inviabilidad, cada una en su proceso medido, sobre los hechos con texto: selección
+de columnas, tipos optimizados y lectura por *chunks* con agregación parcial.
+
+| Técnica | 1 % | 10 % | 50 % | 100 % |
+|---|---|---|---|---|
+| Selección de columnas | 5,3 s | 25,8 s | matada al 99 % de RAM | matada al 98 % |
+| Tipos optimizados | 7,3 s | 20,3 s | matada al 98 % | matada al 97 % |
+| *Chunks* + agregación parcial | 67 s | 835,7 s | 2.401 s | **3.460 s (57,7 min)** |
+
+**Lectura.** Las dos primeras terminan hasta el 10 % y mueren después: el
+texto es columna del contrato (para `avg_text_length`), no se puede descartar
+ni estrechar, y son sus bytes los que llenan la memoria. Los *chunks* son los
+únicos que terminan el 100 %, pero 16 veces más lento que una pasada de Spark
+(~3,6 min), reteniendo 3.734.414 ASINs vivos en conjuntos por tienda (~427 MB)
+para calcular `products`, y sin poder expresar operaciones globales (ordenar
+67 M de filas, percentiles, ventanas). El párrafo de conclusión queda en
+`docs/evidencia/mitigaciones.md`.

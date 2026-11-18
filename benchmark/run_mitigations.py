@@ -106,15 +106,67 @@ def render(records: list[dict]) -> str:
     ]
     for record in records:
         frames = record.get("frames_mb") or {}
-        memory = frames.get("joined") or record.get("peak_tree_mb") or "-"
+        memory = (
+            frames.get("joined")
+            or (max(frames.values()) if frames else None)
+            or record.get("peak_tree_mb")
+            or "-"
+        )
         lines.append(
             f"| {record['technique']} | {record['level']} | "
             f"{record['rows']:,} | {record['status']} | "
             f"{record['seconds'] if record['seconds'] is not None else '-'} | "
             f"{memory} | {record['notes'] or ''} |"
         )
-    lines.extend(["", "Ver tabla por operación en el reporte de la escalera.", ""])
+    lines.extend(
+        [
+            "",
+            "## Por qué ninguna resulta práctica",
+            "",
+            "- **Selección de columnas** y **tipos optimizados** terminan hasta "
+            "el 10 %, pero mueren al 50 % y al 100 %: el texto de la reseña es "
+            "columna del contrato (para `avg_text_length`), no se puede "
+            "descartar ni estrechar, y son sus bytes los que llenan la memoria "
+            "(10–11 GB privados al cortar).",
+            "- **Lectura por *chunks*** es la única que termina el 100 %, pero "
+            "a un precio que ninguna alternativa paga: ~58 minutos contra los "
+            "~3,6 minutos de una pasada de Spark (unas 16 veces más lento), "
+            "reteniendo los conjuntos de ASIN por tienda (3.734.414 productos "
+            "vivos, ~427 MB) para calcular `products`, y sin poder expresar "
+            "operaciones globales —ordenar 67 millones de filas, percentiles, "
+            "ventanas— sin volver a leerlo todo. El código deja de ser una "
+            "agregación y pasa a sumas parciales, suma de cuadrados y fusión "
+            "de acumuladores.",
+            "",
+            "Ninguna acerca a pandas a terminar el 100 % en un tiempo práctico: "
+            "o no termina (columnas, tipos), o termina 16 veces más lento y con "
+            "parte de la lógica reescrita a mano (*chunks*). Ese es el argumento "
+            "de inviabilidad **aun mitigado** que exige el enunciado.",
+            "",
+            "Ver tabla por operación en el reporte de la escalera.",
+            "",
+        ]
+    )
     return "\n".join(lines)
+
+
+def load_records() -> list[dict]:
+    """Rebuild the records from the saved CSV, for re-rendering without runs."""
+    records = []
+    with (EVIDENCE_DIR / "mitigaciones.csv").open(encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            records.append(
+                {
+                    **row,
+                    "rows": int(row["rows"]) if row["rows"] else None,
+                    "seconds": float(row["seconds"]) if row["seconds"] else None,
+                    "peak_tree_mb": float(row["peak_tree_mb"])
+                    if row["peak_tree_mb"]
+                    else None,
+                    "frames_mb": json.loads(row["frames_mb"] or "{}"),
+                }
+            )
+    return records
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -124,7 +176,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--techniques", default=DEFAULT_TECHNIQUES)
     parser.add_argument("--levels", default=DEFAULT_LEVELS)
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
+    parser.add_argument(
+        "--render-only",
+        action="store_true",
+        help="re-render the table from the saved CSV without running anything",
+    )
     args = parser.parse_args(argv if argv is not None else sys.argv[1:])
+
+    if args.render_only:
+        records = load_records()
+        (EVIDENCE_DIR / "mitigaciones.md").write_text(
+            render(records), encoding="utf-8"
+        )
+        print(f"Saved: {EVIDENCE_DIR / 'mitigaciones.md'}", flush=True)
+        return 0
 
     techniques = [item.strip() for item in args.techniques.split(",") if item.strip()]
     fractions = [float(item) for item in args.levels.split(",") if item.strip()]

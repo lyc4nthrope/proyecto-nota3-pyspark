@@ -212,6 +212,21 @@ def _run_total_time(operations: list[dict]) -> float:
     )
 
 
+def _run_one_pass_time(operations: list[dict]):
+    """Time of the write_parquet action: the cost of producing both output
+    tables from scratch.
+
+    Spark is lazy and nothing is cached, so the sum of the per-operation times
+    re-counts the same work several times. The eager pandas sum is a single
+    pass; comparing it against Spark's write_parquet action compares the same
+    thing: one complete production of both tables.
+    """
+    for step in operations:
+        if step["operation"] == "write_parquet":
+            return step["time_s"]
+    return None
+
+
 def _run_peak_mb(operations: list[dict]) -> float:
     peaks = [step["peak_mb"] for step in operations if step.get("peak_mb")]
     return round(max(peaks), 1) if peaks else 0.0
@@ -310,8 +325,9 @@ def render_comparison(comparison: dict) -> str:
                     "Level",
                     "Engine",
                     "Runs",
-                    "Total time mean (s)",
-                    "Total time std (s)",
+                    "Sum of ops mean (s)",
+                    "Sum of ops std (s)",
+                    "One-pass mean (s)",
                     "Max peak RSS (MB)",
                     "Status",
                 ],
@@ -330,6 +346,21 @@ def render_comparison(comparison: dict) -> str:
                                 [_run_total_time(run["operations"]) for run in group]
                             ),
                             2,
+                        ),
+                        (
+                            round(
+                                sum(
+                                    _run_one_pass_time(run["operations"])
+                                    for run in group
+                                )
+                                / len(group),
+                                2,
+                            )
+                            if any(
+                                _run_one_pass_time(run["operations"]) is not None
+                                for run in group
+                            )
+                            else "-"
                         ),
                         max(_run_peak_mb(run["operations"]) for run in group),
                         "ok"
@@ -361,6 +392,13 @@ def render_comparison(comparison: dict) -> str:
             "memory kept from previous ones.",
             "- Times are cumulative wall time per action, because nothing is "
             "cached: operation N re-executes operations 1..N.",
+            "- Because of that, the sum of the operation times over-counts "
+            "Spark's work (the same read runs once per action). The one-pass "
+            "column is the write_parquet action: the cost of producing both "
+            "output tables from scratch. pandas is eager, so its sum already "
+            "is one pass; compare those two columns, not the sums.",
+            "- For the failed pandas runs at 50/100 % there is no one-pass "
+            "time: the run is a kill record, not a timing.",
             "- Peak RSS is total resident memory of the Python process plus its "
             "JVM children, sampled every 50 ms; it is not JVM heap.",
             "- Frame (MB) is the deep in-memory size of the pandas DataFrame "

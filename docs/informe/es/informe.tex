@@ -42,7 +42,7 @@
 % Marca visible para lo que falta antes de entregar.
 \newcommand{\pendiente}[1]{\textcolor{pending}{\textbf{[PENDIENTE: #1]}}}
 
-\title{Procesamiento de 66 millones de reseñas de Amazon:\\
+\title{Procesamiento de 67 millones de reseñas de Amazon:\\
 pandas frente a Apache Spark (PySpark)\\[0.4em]
 \large Proyecto Nota 3 — Big Data con Python y PySpark}
 \author{Cristhian Eduardo Osorio Restrepo \and Daniel Stiven Pérez Córdoba \and Maria Camargo\\[0.3em]
@@ -523,8 +523,8 @@ en la memoria privada que había comprometido; la línea discontinua es la RAM d
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.85\textwidth]{../../evidencia/capturas/pandas_fallo_memoria.png}
-\caption{Administrador de tareas mientras pandas procesa la muestra del 100\,\%: la RAM del
-sistema llega al 98\,\%.}
+\caption{Administrador de tareas mientras pandas procesa los datos: la memoria en uso sube al
+95\,\% (14,6 de 15,3 GB) con 42,5 GB confirmados; la guardia corta estas corridas al 97--99\,\%.}
 \label{fig:captura-pandas}
 \end{figure}
 
@@ -539,8 +539,10 @@ privada comprometidos.}
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.85\textwidth]{../../evidencia/capturas/spark_100_memoria.png}
-\caption{Spark terminando la muestra del 100\,\% con la memoria estable: el pico se mantiene
-por debajo de 6 GB.}
+\caption{Administrador de tareas mientras Spark termina la muestra del 100\,\%: la memoria en
+uso de todo el sistema (otros programas incluidos) se mantiene estable en unos 10 GB, por debajo
+de los 15,3 GB de RAM. El árbol de procesos de Spark solo tuvo un pico de 5.897 MB
+(Tabla~\ref{tab:escalera}).}
 \label{fig:captura-spark}
 \end{figure}
 

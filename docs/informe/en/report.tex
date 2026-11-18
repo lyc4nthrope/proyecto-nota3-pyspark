@@ -41,7 +41,7 @@
 % Visible marker for what is still missing before submission.
 \newcommand{\pending}[1]{\textcolor{pending}{\textbf{[PENDING: #1]}}}
 
-\title{Processing 66 million Amazon reviews:\\
+\title{Processing 67 million Amazon reviews:\\
 pandas versus Apache Spark (PySpark)\\[0.4em]
 \large Proyecto Nota 3 --- Big Data with Python and PySpark}
 \author{Cristhian Eduardo Osorio Restrepo \and Daniel Stiven Pérez Córdoba \and Maria Camargo\\[0.3em]
@@ -512,7 +512,8 @@ memory it had committed; the dashed line is the machine's RAM.}
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.85\textwidth]{../../evidencia/capturas/pandas_fallo_memoria.png}
-\caption{Task Manager while pandas processes the 100\,\% sample: system RAM reaches 98\,\%.}
+\caption{Task Manager while pandas processes the data: memory in use climbs to 95\,\% (14.6 of
+15.3 GB) with 42.5 GB committed; the guard kills such runs at 97--99\,\%.}
 \label{fig:shot-pandas}
 \end{figure}
 
@@ -527,7 +528,9 @@ memory committed.}
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.85\textwidth]{../../evidencia/capturas/spark_100_memoria.png}
-\caption{Spark finishing the 100\,\% sample with stable memory: the peak stays below 6 GB.}
+\caption{Task Manager while Spark finishes the 100\,\% sample: memory in use for the whole
+system (other programs included) stays stable at about 10 GB, below the 15.3 GB of RAM. The
+Spark process tree alone peaked at 5\,897 MB (Table~\ref{tab:ladder}).}
 \label{fig:shot-spark}
 \end{figure}
 
